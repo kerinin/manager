@@ -28,12 +28,13 @@ Manager solves these problems by building a state machine on top of
 assign processes to instances.
 
 
-## Use
+## How to use it
 
-Manager is intended to be used to build daemon processes which run on each
-instance participating in a cluster.  To define a cluster's behavior, you build
-a ruby script which defines your manager and run it under supervision.  It will
-take care of starting & stopping processes as the instance acquires work.
+Manager allows you to build a daemon processes to run on each
+instance participating in a cluster.  To define a cluster's behavior, you write
+a ruby script to define your manager and run it under supervision on each node
+in the cluster.  It will take care of starting & stopping processes as the 
+instance acquires work.
 
 Here's an example definition for a cluster of Kafka consumers
 
@@ -42,82 +43,96 @@ Here's an example definition for a cluster of Kafka consumers
 #!/usr/bin/env ruby
 require 'manager'
 
-# Create a manager and tell it where to find at least on Consul server
+# Create a manager and tell it where to find at least one Consul server
 manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
   # Consul can manage multiple services, so we'll tell it which one we're defining
-  m.service_name = 'my awesome service'
+  # `service_id` must be unique withing a Consul cluster, but only needs to be 
+  # specified if `service_name` (which is required) isn't unique
+  m.service_id = 'kafka_consumer_1'
+  m.service_name = 'Kafka Consumer'
 
-  # We'll tell manager about the units of work we want to allocate to instances
+  # We can set agent config settings if we need something special.  See
+  # http://www.consul.io/docs/agent/options.html for supported options.
+  m.consul_agent_options = {
+    log_level: :warn,
+    config_file: '/path/to/config',
+    ca_file: '/path/to/CA/file',    # Certificate authority file for TLS
+    verify_outgoing: true,          # Ensure we're talking to the real Consul
+  }
+
+  # We'll tell manager about the units of work we want to allocate to instances.
   # In this case we want each instance to process data from a number of Kafka
   # partitions, and we want to make sure that each partition is only processed
   # by one instance.
   m.partitions = (0...ENV['KAFKA_PARTITION_COUNT']).to_a.map(&:to_s)
   
-  # This is the action we want the manager to take when a partition is allocated
-  # to this instance.  
+  # This is the action we want the daemon to take when a partition is acquired 
+  # by this instance.  
   m.on_acquiring_partition do |partition|
     # The manager exposes #exec, which executes arbitrary commands in a
     # sub-process.  This ensures that if the manager daemon dies, the processes
     # will be killed as well.
-    m.exec 'bundle exec ruby process_kafka_partition.rb --partition #{partition}'
+    m.exec(
+      name: partition,  # The name allows us to lookup the PID later
+      command: 'bundle exec ruby process_kafka_partition.rb --partition #{partition}'
+    )
   end
 
   # Now we tell the manager how to gracefully stop doing work
   m.on_releasing_partition do |partition|
-    # We'll allow the process to exit gracefully
-    m.sigterm(partition)
+    # We'll allow the process to exit gracefully.  Manager tracks the PID's of
+    # each process created with #exec, you can get them by calling #pid with the
+    # name provided to #exec
+    `kill(#{m.pid(partition)}, SIGTERM)`
   end
 
-  # Let's use Consul's health checks to make sure the process is responsive
-  # Health checks come in two flavors: Script and TTL.  Script health checks are
-  # triggered if the return value of the script isn't 0 (TTL is described below)
-  m.health_check_script do |check, partition|
+  # Let's use Consul's health checks to make sure the process is responsive.
+  # Health checks come in two flavors: Script and TTL.  'Script' health checks 
+  # are triggered if the return value of the script isn't 0
+  # (TTL is described below)
+  m.health_check_script('Make sure the process is alive') do |check, partition|
     # Health checks must have globally unique identifier
+    # If your name is unique, this can be omitted
     check.id = "health_check_#{partition}"
-
-    # But we can give it a more descriptive name
-    check.name = "Make sure the process is alive"
 
     # ...and add a description of what's happening
     check.notes = "Sends SIGUSR1 to the process and fails if the process doesn't respond"
 
-    # This is the script that will be run.  It should return 0 if the process is healthy
+    # This is the script that will be run.  Our process should return 0 if it's OK
     check.script = "kill(#{m.pid(partition)}, SIGUSR1)"
 
     # We'll call this script once a minute
     check.interval = 1.minute
+
+    # Now let's define how we want to respond to health-check failures
+    # This block will be called when the health check enters the 'failed' state
+    check.on_failure do
+      # We don't really know what caused this, so we'll call in the posse
+      Pagerduty.new(ENV['PAGERDUTY_SERVICE_KEY']).
+        trigger("Health Check '#{check.name}' failed on partition #{partition}")
+    end
+
+    # Let's call off the posse if the problem resolves itself
+    check.on_pass do
+      Pagerduty.new(ENV['PAGERDUTY_SERVICE_KEY']).
+        resolve("Health Check '#{check.name}' failed on partition #{partition}")
+    end
+
+    # We can also respond to the check entering the 'warn' state
+    check.on_warning do
+      # Whatevs 
+    end
   end
 
-  # TTL checks allow a process to tell Consul that it's doing OK (rather than
-  # Consul asking it, as with Script checks)
-  m.health_check_ttl do |check, partition|
-    # ID's are optional, if you name is unique
-    check.name = "Data being processed for partition #{partition}"
-
+  # TTL checks allow a process to tell Consul that it's doing OK
+  # (rather than Consul asking it, as with Script checks)
+  m.health_check_ttl("ttl_check_#{partition}") do |check, partition|
     # If the process doesn't make an HTTP request to 
-    # http://localhost/v1/agent/check/pass/<name> for 5 minutes, the check 
-    # will be triggered
+    # http://localhost/v1/agent/check/pass/ttl_check_<name> for 5 minutes, 
+    # the check will be triggered
     check.ttl = 5.minutes
   end
 
-  # Now let's define how we want to respond to health-check failures
-  # This block will be called with the check status and partition, the status
-  # will look something like this:
-  # {
-  #     "Node": "foobar",
-  #     "CheckID": "service:redis",
-  #     "Name": "Service 'redis' check",
-  #     "Status": "passing",
-  #     "Notes": "",
-  #     "Output": "",
-  #     "ServiceID": "redis",
-  #     "ServiceName": "redis"
-  # }
-  m.on_health_check_failure do |check_status, partition|
-    # We don't really know what caused this, so we'll call in the posse
-    Pagerduty.new(ENV['PAGERDUTY_SERVICE_KEY']).
-      trigger("Health Check '#{check_status["ServiceName"]}' failed on partition #{partition}")
-  end
 end
 
 # All done!  Let's start up the manager and start processing data
@@ -126,10 +141,90 @@ manager.run
 
 All you need to do now is put `my_manager_daemon.rb` on each instance in your
 cluster and use something like [God](http://godrb.com/) or
-[Upstart](http://upstart.ubuntu.com/) to ensure that it stays running.  Manager
-will take care of announcing new instances to the cluster, assigning partitions
-to each instance, rebalancing the cluster if an instance goes down or is
-terminated and monitoring your service's health.
+[Upstart](http://upstart.ubuntu.com/) to ensure that it stays running.
+
+    KAFKA_PARTITION_COUNT=16 PAGERDUTY_SERVICE_KEY=key bundle exec ruby my_manager_daemon.rb
+
+Manager will take care of announcing new instances to the cluster, assigning 
+partitions to each instance, rebalancing the cluster if an instance goes down 
+or is terminated and monitoring your service's health.
 
 
 ## How it actually works
+
+### Preliminaries
+
+Consul provides a mechanism for service discovery and consistent, distributed KV
+store.  It provides an HTTP API which accepts blocking requests which can be
+used to generate event handlers when the KV store (or the cluster topology)
+changes.  Manager uses Consul to solve all the tricky problems of distributed
+decision-making.
+
+
+### Basic Architecture
+
+We'll use the same basic terminology as
+[Helix](http://helix.apache.org/Concepts.html): a cluster is made up of a number
+of instances and a number of partitions.  Each instance processes as many
+partitions as are required to fully consume the partitions.  The task is to
+ensure that each partition as assigned to at-most-one instance and eventually
+exactly-one instance.  (One difference between this proposal and Helix is that
+I'm not building in any type of restrictions on how instances can transition
+between partitions or what partitions can be co-located on an instance, ie
+Master/Slave separation)
+
+Partitions exist in one of 2 states, __assumed__ partitions have been
+acknowledged by the instance which owns them, while __assigned__ partitions have
+not.  Partition allocation is deterministic given a set of partitions &
+instances (for example using the
+[RUSH](http://www.ssrc.ucsc.edu/media/papers/honicky-ipdps04.pdf) algorithm), so
+there is always a mapping from a partition to an instance, however instances
+must explicitly 'assume' responsiblity for a partition.  This ensures that
+partition assignment remains consistent during topology changes, and allows
+instances to signal that they have released ownership of a partition and the
+partition is ready to be transferred to its new owner.
+
+
+### Events
+
+The nodes need to handle a few events:
+* __Rebalance__: When the cluster topology changes, a new partition mapping is
+  computed.  Processing on assumed partitions which are no longer assigned is
+terminated and the partitions are released.  Assigned partitions which are not
+assumed are acquired as they become available and processing is started.
+(Executed by all instances)
+* __Enter__: When an instance enters the cluster it registers itself with the
+  cluster and executes a rebalance. (Executed by the instance entering the
+cluster)
+* __Leave__: When an instance leaves the cluster, it terminates processing on
+  assumed partitions, releases its assumed partitions and deregisters itself
+from the cluster. (Executed by the instance leaving the cluster)
+* __Local failure__: When an instance loses its connection to the cluster, it
+  terminates processing on assumed partitions. (Executed by the instance which
+failed)
+* __Remote failure__: When an instance become unresponsive, its partitions are
+  released and it is deregistered from the cluser by another instance. (Executed
+by all instances)
+* __Health check failure__: When an instance's health check fails, it optionally
+  executes user-defined handlers - we make no assumptions about the implications
+of a health check fail. (Executed by the instance whose health-check failed)
+
+
+### Actions
+
+To accomplish these events, the following actions need to be implemented:
+
+* Compute partition map based on the cluster topology and the instance's
+  identity
+* Transition from one partition map to another
+* Enter the cluster
+* Leave the cluster
+* Force another node to leave the cluster
+* Listen for topology changes
+* Listen for partition asignment changes
+* Begin processing
+* Terminate processing
+* Acquire a partition
+* Release a partition
+* Respond to a failing health check
+
