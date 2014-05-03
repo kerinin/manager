@@ -36,7 +36,11 @@ a ruby script to define your manager and run it under supervision on each node
 in the cluster.  It will take care of starting & stopping processes as the 
 instance acquires work.
 
-Here's an example definition for a cluster of Kafka consumers
+The first thing you'll need is a working Consul cluster, so if you don't have
+that, take a minute to learn about [Consul](http://www.consul.io/).
+
+Next, you'll need to write your daemon.  Here's an example definition for a 
+cluster of Kafka consumers
 
 ```ruby
 # /my_manager_daemon.rb
@@ -132,7 +136,6 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
     # the check will be triggered
     check.ttl = 5.minutes
   end
-
 end
 
 # All done!  Let's start up the manager and start processing data
