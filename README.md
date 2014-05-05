@@ -44,8 +44,10 @@ cluster of Kafka consumers
 
 ```ruby
 # /my_manager_daemon.rb
+
 #!/usr/bin/env ruby
 require 'manager'
+require 'pagerduty'
 
 # Create a manager and tell it where to find at least one Consul server
 manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
@@ -64,6 +66,9 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
     verify_outgoing: true,          # Ensure we're talking to the real Consul
   }
 
+  # In case you want to use Consul's tagging functionality
+  m.consul_agent_tags = [:consumer]
+
   # We'll tell manager about the units of work we want to allocate to instances.
   # In this case we want each instance to process data from a number of Kafka
   # partitions, and we want to make sure that each partition is only processed
@@ -71,7 +76,8 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
   m.partitions = (0...ENV['KAFKA_PARTITION_COUNT']).to_a.map(&:to_s)
   
   # This is the action we want the daemon to take when a partition is acquired 
-  # by this instance.  
+  # by this instance.  Note that this block should be non-blocking.  Manager is
+  # not intended to serve as the 'outer loop' for your entire application.
   m.on_acquiring_partition do |partition|
     # The manager exposes #exec, which executes arbitrary commands in a
     # sub-process.  This ensures that if the manager daemon dies, the processes
@@ -87,7 +93,7 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
     # We'll allow the process to exit gracefully.  Manager tracks the PID's of
     # each process created with #exec, you can get them by calling #pid with the
     # name provided to #exec
-    `kill(#{m.pid(partition)}, SIGTERM)`
+    `kill(#{m.pids[partition]}, SIGTERM)`
   end
 
   # Let's use Consul's health checks to make sure the process is responsive.
@@ -103,7 +109,7 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
     check.notes = "Sends SIGUSR1 to the process and fails if the process doesn't respond"
 
     # This is the script that will be run.  Our process should return 0 if it's OK
-    check.script = "kill(#{m.pid(partition)}, SIGUSR1)"
+    check.script = "kill(#{m.pids[partition]}, SIGUSR1)"
 
     # We'll call this script once a minute
     check.interval = 1.minute
@@ -196,6 +202,9 @@ The nodes need to handle a few events:
 terminated and the partitions are released.  Assigned partitions which are not
 assumed are acquired as they become available and processing is started.
 (Executed by all instances)
+* __Update Partitions__: When a daemon first start, it updates the partition set
+  to match it's local definition and triggers rebalance. (Update executed by new
+instance, rebalance executed by all instances)
 * __Enter__: When an instance enters the cluster it registers itself with the
   cluster and executes a rebalance. (Executed by the instance entering the
 cluster)
@@ -219,15 +228,16 @@ To accomplish these events, the following actions need to be implemented:
 
 * Compute partition map based on the cluster topology and the instance's
   identity
+* Update the partition set
 * Transition from one partition map to another
 * Enter the cluster
 * Leave the cluster
 * Force another node to leave the cluster
 * Listen for topology changes
 * Listen for partition asignment changes
+* Listen for partition set changes
 * Begin processing
 * Terminate processing
 * Acquire a partition
 * Release a partition
 * Respond to a failing health check
-
