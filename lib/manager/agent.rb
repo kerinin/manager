@@ -1,5 +1,7 @@
 class Manager
   class Agent
+    class CASException < StandardError; end
+
     extend Assembler
     
     assemble_from(
@@ -7,10 +9,16 @@ class Manager
       agent_options: {},
     )
 
-    def begin
-      options = agent_options.map { |k,v| "-#{k.to_s.gsub('_','-')}=#{v}" }.join(' ')
+    def start
+      default_options = {data_dir: './'}
+      options = default_options.
+        merge(agent_options).
+        map { |k,v| "-#{k.to_s.gsub('_','-')}=#{v}" }.join(' ')
 
-      `consul agent #{options}`
+      pid = Process.fork
+      if pid.nil?
+        exec "consul agent #{options} > /dev/null 2>&1"
+      end
     end
 
     def join
@@ -30,10 +38,10 @@ class Manager
         b.path = "v1/kv/#{key}"
         b.queryargs = options
 
-        yield b in block_given?
+        yield b if block_given?
       end.response
 
-      return res.body
+      return JSON.parse(res.body) if res.body
     end
 
     def put_key(key, value, options={})
@@ -43,10 +51,10 @@ class Manager
         b.queryargs = options
         b.body = value
 
-        yield b in block_given?
+        yield b if block_given?
       end.response
 
-      raise CASException if response.body == 'false'
+      raise CASException if res.body == 'false'
 
       return true
     end
@@ -109,13 +117,8 @@ class Manager
       )
 
       def response
-        response = connection.send(verb, url_for(path, queryargs))
-
-        case response.status.to_s
-        when /2../
-          return response
-        else
-          raise StandardError, 'HTTP fucked, too lazy to write explicit error classes'
+        connection.send(verb, url_for(path, queryargs)) do |req|
+          req.body = body if body
         end
       end
 
@@ -123,6 +126,14 @@ class Manager
 
       def url_for(path, options={})
         "#{path}?#{options.map {|k,v| "#{k}=#{v}"}.join("&")}"
+      end
+
+      def connection
+        @connection ||= Faraday.new(url: 'http://localhost') do |f|
+          f.adapter   Faraday.default_adapter
+          f.use       FaradayMiddleware::EncodeJson
+          f.use       Faraday::Response::RaiseError
+        end
       end
     end
   end

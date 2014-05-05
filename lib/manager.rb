@@ -1,5 +1,9 @@
+require "assembler"
 require "manager/version"
 require "consistent_hashing"
+require 'faraday'
+require 'faraday_middleware'
+require 'json'
 
 class Manager
 
@@ -169,3 +173,10 @@ class Manager
     @coordinator ||= Coordinator.new
   end
 end
+
+require 'manager/agent'
+require 'manager/coordinator'
+require 'manager/listener'
+require 'manager/partition'
+require 'manager/partitions'
+require 'manager/task'
