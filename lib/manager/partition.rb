@@ -10,6 +10,8 @@ class Manager
   # which knows how to compute partition assignments.
   #
   class Partition
+    class IllegalModificationException < StandardError; end
+
     extend Assembler
 
     assemble_from(
@@ -21,35 +23,45 @@ class Manager
     attr_reader :assigned_to
 
     def assigned_to?(node)
-      assigned_to == node
+      assigned_to.to_s == node.to_s
     end
 
     def acquired_by
-      Base64.decode64(remote_value["Value"])
+      remote_value.value
     end
 
     def acquired_by?(node)
-      acquired_by == node
+      acquired_by.to_s == node.to_s
     end
 
     def acquire
-      if acquired_by
-        raise StandardError, "Tried to acquire an already-acquired partition"
+      if acquired_by?(service_id)
+        return true
+      elsif acquired_by
+        raise IllegalModificationException, "Tried to acquire partition #{partition_key}, but it's already assigned to #{acquired_by}"
       else
-        agent.set_key(key, value) do |b|
+        agent.set_key(partition_key, service_id) do |b|
           b.queryargs = {cas: remote_value["ModifyIndex"]}
         end
       end
     end
 
     def release
-      agent.set_key(key, nil)
+      if !acquired_by
+        return true
+      elsif !acquired_by?(service_id)
+        raise IllegalModificationException, "Tried to release partition #{partition_key}, but it's assigned to #{acquired_by}"
+      else
+        agent.set_key(partition_key, nil) do |b|
+          b.queryargs = {cas: remote_value["ModifyIndex"]}
+        end
+      end
     end
 
     private
 
     def remote_value
-      @remote_value = agent.get_key(key)
+      @remote_value = agent.get_key(partition_key)
     end
   end
 end

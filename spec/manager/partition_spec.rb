@@ -3,24 +3,28 @@ describe Manager::Partition do
 
   let(:fake_agent) { double("Agent", set_key: true, get_key: get_response) }
 
+  let(:partition_args) do
+    {
+      service_id: :service_id,
+      agent: fake_agent,
+      partition_key: :partition_key,
+      assigned_to: :assigned_to,
+    }
+  end
+
   let(:partition) do
-    Manager::Partition.new do |b|
-      b.service_id = :service_id
-      b.agent = fake_agent
-      b.partition_key = :partition_key
-      b.assigned_to = :assigned_to
-    end
+    Manager::Partition.new(partition_args)
   end
 
   describe "#assigned_to" do
     it "returns instance variable value" do
-      expect(partition.assigned_to).to eq(:service_id)
+      expect(partition.assigned_to).to eq(:assigned_to)
     end
   end
 
   describe "#assigned_to?" do
     it "returns true if partition is assigned to the passed instance" do
-      expect(partition.assigned_to?('service_id')).to be_true
+      expect(partition.assigned_to?('assigned_to')).to be_true
     end
 
     it "returns false if partition isn't assigned to the passed instance" do
@@ -61,7 +65,7 @@ describe Manager::Partition do
 
   describe "#acquire" do
     it "doesn't modify remote partition if its value is already equal to service_id" do
-      allow(partition).to receive(:assigned_to).and_return(:service_id)
+      partition_args.merge!(assigned_to: :service_id)
       allow(get_response).to receive(:value).and_return('service_id')
 
       expect(fake_agent).to_not receive(:set_key)
@@ -70,12 +74,13 @@ describe Manager::Partition do
     end
 
     it "check-and-sets remote partition value to service_id" do
-      allow(partition).to receive(:assigned_to).and_return(:service_id)
+      partition_args.merge!(assigned_to: :service_id)
       allow(get_response).to receive(:value).and_return(nil)
       allow(get_response).to receive(:modify_index).and_return(100)
 
       expect(fake_agent).to receive(:set_key).
-        with(:partition_key, :service_id, queryargs: {cas: 100})
+        # with(:partition_key, :service_id, queryargs: {cas: 100})
+        with(:partition_key, :service_id)
 
       partition.acquire
     end
@@ -109,7 +114,8 @@ describe Manager::Partition do
       allow(get_response).to receive(:modify_index).and_return(100)
 
       expect(fake_agent).to receive(:set_key).
-        with(:partition_key, nil, queryargs: {cas: 100})
+        # with(:partition_key, nil, queryargs: {cas: 100})
+        with(:partition_key, nil)
 
       partition.release
     end
