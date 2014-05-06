@@ -70,10 +70,16 @@ describe Manager::Agent do
           "Value" => "dGVzdA=="
         }
       ]
+      response = OpenStruct.new(
+        value: Base64.decode64("dGVzdA=="),
+        create_index: 100,
+        modify_index: 200,
+        flags: 0
+      )
       stub_request(:get, "http://localhost/v1/kv/foo").
         to_return(body: JSON.dump(body))
 
-      expect(agent.get_key(:foo)).to eq(body)
+      expect(agent.get_key(:foo)).to eq(response)
     end
 
     it "raises exception on non-200 response" do

@@ -32,6 +32,9 @@ class Manager
       return true
     end
 
+    def register_service(service)
+    end
+
     def get_key(key, options={})
       res = Request.new do |b|
         b.verb = :get

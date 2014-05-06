@@ -176,7 +176,6 @@ end
 
 require 'manager/agent'
 require 'manager/coordinator'
-require 'manager/listener'
 require 'manager/partition'
 require 'manager/partitions'
 require 'manager/task'

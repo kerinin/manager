@@ -1,10 +1,21 @@
 class Manager
+  # The Partition class manages partition assignement in the Consul KV store
+  # and exposes methods describing partition assignment and acquisition.
+  #
+  # This class is intended to be a short-lived snapshot of the remote state of
+  # the Consul store.  The remote value is requested once and memoized.  
+  #
+  # If you're instantiating these directly, you're probably doing something
+  # wrong - these should generally be constructed by a Partitions instance,
+  # which knows how to compute partition assignments.
+  #
   class Partition
     extend Assembler
 
     assemble_from(
+      :service_id,
       :agent,
-      :key,
+      :partition_key,
       :assigned_to,
     )
     attr_reader :assigned_to
