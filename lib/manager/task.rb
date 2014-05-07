@@ -2,7 +2,13 @@ class Manager
   class Task
     extend Assembler
 
-    assemble_from(:partition, :on_start, :on_terminate)
+    assemble_from(
+      :partition,
+      :on_start,
+      :on_terminate,
+      :logger,
+      log_progname: self.name,
+    )
 
     def start
       on_start.call partition

@@ -6,6 +6,8 @@ class Manager
     
     assemble_from(
       :consul_servers,
+      :logger,
+      log_progname: self.name,
       agent_options: {},
     )
 

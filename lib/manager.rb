@@ -9,11 +9,12 @@ class Manager
 
   def initialize(options = {})
     @consul_servers = options[:consul_servers]
+    @logger = options[:logger] || Logger.new(STDOUT)
 
     yield self
   end
 
-  attr_accessor :service_name, :service_id
+  attr_accessor :service_name, :service_id, :logger
 
   def consul_agent_options=(hash)
     @consul_agent_options = hash
@@ -149,12 +150,14 @@ class Manager
       b.consul_servers = @consul_servers
       b.service_name = @service_name
       b.service_id = @service_id if @service_id
+      b.logger = logger
     end
   end
 
   def partitions
     Partitions.new do |b|
       b.agent = agent
+      b.logger = logger
     end
   end
 
@@ -165,12 +168,13 @@ class Manager
         b.on_start = @on_acquiring_partition_block
         b.on_terminate = @on_releasing_partition_block
         # b.health_checks = health_checks
+        b.logger = logger
       end
     end
   end
 
   def coordinator
-    @coordinator ||= Coordinator.new
+    @coordinator ||= Coordinator.new(logger: logger)
   end
 end
 

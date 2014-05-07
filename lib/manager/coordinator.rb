@@ -1,5 +1,12 @@
 class Manager
   class Coordinator
+    extend Assembler
+
+    assemble_from(
+      :logger,
+      log_progname: self.name,
+    )
+
     def add_listener(endpoint, &block)
       threads << Thread.new {
         Listener.new(endpoint: endpoint).each do |json|

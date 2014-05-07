@@ -21,7 +21,9 @@ class Manager
       :agent,
       :service_id,
       :partition_key,
+      :logger,
       partitioner: ConsistentHashPartitioner,
+      log_progname: self.name,
     )
 
     def each(&block)
@@ -31,6 +33,7 @@ class Manager
           agent: agent,
           partition_key: partition_key,
           assigned_to: node_id,
+          logger: logger,
         )
         block.call partition
       end

@@ -19,6 +19,8 @@ class Manager
       :agent,
       :partition_key,
       :assigned_to,
+      :logger,
+      log_progname: self.name,
     )
     attr_reader :assigned_to
 
