@@ -21,7 +21,7 @@ class Manager
       :agent,
       :service_id,
       :partition_key,
-      :logger,
+      logger: Logger.new(STDOUT),
       partitioner: ConsistentHashPartitioner,
       log_progname: self.name,
     )
@@ -40,6 +40,8 @@ class Manager
     end
 
     def save(partition_set)
+      logger.info(log_progname) { "Saving partition set '#{partition_set}'" }
+
       agent.set_key(partition_key, partition_set)
     end
 

@@ -19,7 +19,7 @@ class Manager
       :agent,
       :partition_key,
       :assigned_to,
-      :logger,
+      logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
     attr_reader :assigned_to
@@ -37,6 +37,8 @@ class Manager
     end
 
     def acquire
+      logger.info(log_progname) { "Attempting to acquire partition #{partition_key}" }
+
       if acquired_by?(service_id)
         return true
       elsif acquired_by
@@ -49,6 +51,8 @@ class Manager
     end
 
     def release
+      logger.info(log_progname) { "Attempting to release partition #{partition_key}" }
+
       if !acquired_by
         return true
       elsif !acquired_by?(service_id)

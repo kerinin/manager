@@ -6,7 +6,7 @@ class Manager
     
     assemble_from(
       :consul_servers,
-      :logger,
+      logger: Logger.new(STDOUT),
       log_progname: self.name,
       agent_options: {},
     )
@@ -17,6 +17,8 @@ class Manager
         merge(agent_options).
         map { |k,v| "-#{k.to_s.gsub('_','-')}=#{v}" }.join(' ')
 
+      logger.info(log_progname) { "Starting agent with options '#{options}'" }
+
       pid = Process.fork
       if pid.nil?
         exec "consul agent #{options} > /dev/null 2>&1"
@@ -24,9 +26,13 @@ class Manager
     end
 
     def join
+      consul_server = consul_servers.shuffle.first
+
+      logger.info(log_progname) { "Joining Consul server cluster at '#{consul_server}'" }
+
       Request.new do |b|
         b.verb = :get
-        b.path = "/v1/agent/join/#{consul_servers.shuffle.first}"
+        b.path = "/v1/agent/join/#{consul_server}"
 
         yield b if block_given?
       end.response
@@ -38,6 +44,8 @@ class Manager
     end
 
     def get_key(key, options={})
+      logger.info(log_progname) { "Requesting key '#{key}' with options '#{options}'" }
+
       res = Request.new do |b|
         b.verb = :get
         b.path = "v1/kv/#{key}"
@@ -50,6 +58,8 @@ class Manager
     end
 
     def put_key(key, value, options={})
+      logger.info(log_progname) { "Setting key '#{key}'='#{value}' with options '#{options}'" }
+
       res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/kv/#{key}"
@@ -65,6 +75,8 @@ class Manager
     end
 
     def delete_key(key, options={})
+      logger.info(log_progname) { "Deleting key '#{key}' with options '#{options}'" }
+
       Request.new do |b|
         b.verb = :delete
         b.path = "/v1/kv/#{key}"
@@ -76,6 +88,8 @@ class Manager
     end
 
     def get_service_health(service_id)
+      logger.info(log_progname) { "Getting health status for service '#{service_id}'" }
+
       res = Request.new do |b|
         b.verb = :get
         b.path = "v1/health/service/#{service_id}"
@@ -88,6 +102,8 @@ class Manager
     end
 
     def register_check(check)
+      logger.info(log_progname) { "Registering check '#{check}'" }
+
       Request.new do |b|
         b.verb = :put
         b.path = "/v1/agent/check/register"
@@ -100,6 +116,8 @@ class Manager
     end
 
     def force_leave(node)
+      logger.info(log_progname) { "Forcing node '#{node}' to leave the Consul cluster" }
+
       Request.new do |b|
         b.verb = :get
         b.path = "/v1/agent/force-leave/#{node}"
@@ -111,6 +129,8 @@ class Manager
     end
 
     def leave
+      logger.info(log_progname) { "Leaving the Consul cluster" }
+
       `consul leave`
     end
 

@@ -4,6 +4,7 @@ require "consistent_hashing"
 require 'faraday'
 require 'faraday_middleware'
 require 'json'
+require 'logger'
 
 class Manager
 

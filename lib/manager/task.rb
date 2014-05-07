@@ -6,15 +6,19 @@ class Manager
       :partition,
       :on_start,
       :on_terminate,
-      :logger,
+      logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
 
     def start
+      logger.info(log_progname) { "Starting task for partition '#{partition}'" }
+
       on_start.call partition
     end
 
     def terminate
+      logger.info(log_progname) { "Terminating task for partition '#{partition}'" }
+
       on_terminate.call partition
     end
   end

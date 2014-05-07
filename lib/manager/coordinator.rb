@@ -3,11 +3,13 @@ class Manager
     extend Assembler
 
     assemble_from(
-      :logger,
+      logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
 
     def add_listener(endpoint, &block)
+      logger.info(log_progname) { "Adding listener on '#{endpoint}'" }
+
       threads << Thread.new {
         Listener.new(endpoint: endpoint).each do |json|
           work_queue << [block, json]
@@ -16,6 +18,8 @@ class Manager
     end
 
     def run
+      logger.info(log_progname) { "Starting the work loop" }
+
       loop do
         drain_work_queue
         sleep 1
@@ -23,6 +27,8 @@ class Manager
     end
 
     def drain_work_queue
+      logger.info(log_progname) { "Draining the work queue" }
+
       loop do
         value = work_queue.pop(true)
         value.first.call(*value[1..-1])
@@ -34,6 +40,8 @@ class Manager
     end
 
     def kill
+      logger.info(log_progname) { "Killing managed threads" }
+
       threads.each(&:kill)
     end
 
