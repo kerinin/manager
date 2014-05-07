@@ -73,6 +73,18 @@ class Manager
       return true
     end
 
+    def get_service_health(service_id)
+      res = Request.new do |b|
+        b.verb = :get
+        b.path = "v1/health/service/#{service_id}"
+        b.queryargs = options
+
+        yield b if block_given?
+      end.response
+
+      return JSON.parse(res.body) if res.body
+    end
+
     def register_check(check)
       Request.new do |b|
         b.verb = :put

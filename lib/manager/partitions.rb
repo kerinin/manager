@@ -3,29 +3,47 @@ class Manager
     extend Assembler
     include Enumerable
 
-    assemble_from(
-      :agent,
-      :service,
-      :partition_key,
-      partition_set: nil
-    )
-
-    def each(&block)
-      partition_assignments.each do |partition_key, node_ip|
-        block.call Partition.new(agent: agent, key: partition_key, assigned_to: node_ip)
+    module LinearPartitioner
+      def self.call(partitions, nodes)
+        Hash[partitions.map.with_index { |key, i| [key, nodes[i % nodes.length] ] }]
       end
     end
 
-    def save(set)
-      agent.set_key(partition_key, set)
+    module ConsistentHashPartitioner
+      def self.call(partitions, nodes)
+        ring = ConsistentHashing::Ring.new
+        ring.add(nodes)
+        Hash[partitions.map { |key| [key, ring.node_for(key).first] }]
+      end
+    end
+
+    assemble_from(
+      :agent,
+      :service_id,
+      :partition_key,
+      partitioner: ConsistentHashPartitioner,
+    )
+
+    def each(&block)
+      partition_assignments.each do |partition_key, node_id|
+        partition = Partition.new(
+          service_id: service_id,
+          agent: agent,
+          partition_key: partition_key,
+          assigned_to: node_id,
+        )
+        block.call partition
+      end
+    end
+
+    def save(partition_set)
+      agent.set_key(partition_key, partition_set)
     end
 
     private
 
     def partition_assignments
-      ring = ConsistentHashing::Ring.new
-      ring.add(nodes)
-      Hash[partition_keys.map { |key| [key, ring.node_for(key)] }]
+      partitioner.call(partition_keys, nodes)
     end
 
     def partition_keys
@@ -33,7 +51,10 @@ class Manager
     end
 
     def nodes
-      @nodes ||= agent.get_service(service).map { |h| h["Address"] }
+      @nodes ||= agent.
+        get_service_health(service_id).
+        select { |h| h["Checks"].all? { |c| c["Status"] == "passing" } }.
+        map { |h| h["Node"]["Node"] }
     end
   end
 end

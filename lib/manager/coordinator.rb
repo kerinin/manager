@@ -10,12 +10,24 @@ class Manager
 
     def run
       loop do
-        if value = work_queue.pop
-          value.first.call value.rest
-        else
-          sleep 1
-        end
+        drain_work_queue
+        sleep 1
       end
+    end
+
+    def drain_work_queue
+      loop do
+        value = work_queue.pop(true)
+        value.first.call(*value[1..-1])
+      end
+    rescue ThreadError
+      unless $!.message.match /queue empty/
+        raise
+      end
+    end
+
+    def kill
+      threads.each(&:kill)
     end
 
     private
@@ -33,7 +45,7 @@ class Manager
 
       assemble_from(
         :endpoint,
-        timout: '10m',
+        timeout: '10m',
       )
 
       def each(&block)
@@ -53,16 +65,18 @@ class Manager
 
       def do_request(index=nil)
         response = if index
-                     client.get("#{endpoint}?wait=#{timeout}&index=#{index}")
+                     connection.get("#{endpoint}?wait=#{timeout}&index=#{index}")
                    else
-                     client.get(endpoint)
+                     connection.get(endpoint)
                    end
 
-        case response.status.to_s
-        when /2../
-          return response.body, response.headers["X-Consul-Index"]
-        else
-          raise StandardError, 'HTTP Failure'
+        return JSON.parse(response.body), response.headers["X-Consul-Index"]
+      end
+
+      def connection
+        @connection ||= Faraday.new(url: 'http://localhost') do |f|
+          f.adapter   Faraday.default_adapter
+          f.use       Faraday::Response::RaiseError
         end
       end
     end
