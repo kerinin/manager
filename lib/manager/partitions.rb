@@ -42,7 +42,7 @@ class Manager
     def save(partition_set)
       logger.info(log_progname) { "Saving partition set '#{partition_set}'" }
 
-      agent.set_key(partition_key, partition_set)
+      agent.put_key(partition_key, partition_set)
     end
 
     private

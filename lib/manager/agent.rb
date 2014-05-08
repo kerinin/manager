@@ -15,13 +15,24 @@ class Manager
       default_options = {data_dir: './'}
       options = default_options.
         merge(agent_options).
-        map { |k,v| "-#{k.to_s.gsub('_','-')}=#{v}" }.join(' ')
+        map { |k,v| ["-#{k.to_s.gsub('_','-')}", v] }.
+        map { |k,v| [true,false].include?(v) ? k : "#{k}=#{v}"  }.
+        join(' ')
+      # command = "consul agent #{options} > /dev/null 2>&1"
+      command = "consul agent #{options}"
 
-      logger.info(log_progname) { "Starting agent with options '#{options}'" }
+      logger.info(log_progname) { "Starting agent with `#{command}`" }
 
       pid = Process.fork
       if pid.nil?
-        exec "consul agent #{options} > /dev/null 2>&1"
+        exec command
+      else
+        begin
+          res = Request.new(verb: :get, path: '/v1/catalog/datacenters').response
+        rescue Faraday::Error::ConnectionFailed
+          sleep 1
+          retry
+        end
       end
     end
 
@@ -54,7 +65,16 @@ class Manager
         yield b if block_given?
       end.response
 
-      return JSON.parse(res.body) if res.body
+      if res.body
+        return JSON.parse(res.body).map do |json|
+          OpenStruct.new(
+            value: Base64.decode64(json["Value"]),
+            create_index: json["CreateIndex"],
+            modify_index: json["ModifyIndex"],
+            flags: json["Flags"],
+          )
+        end
+      end
     end
 
     def put_key(key, value, options={})
@@ -87,7 +107,7 @@ class Manager
       return true
     end
 
-    def get_service_health(service_id)
+    def get_service_health(service_id, options={})
       logger.info(log_progname) { "Getting health status for service '#{service_id}'" }
 
       res = Request.new do |b|
@@ -155,18 +175,22 @@ class Manager
 
       def response
         connection.send(verb, url_for(path, queryargs)) do |req|
-          req.body = body if body
+          req.body = body.to_json if body
         end
       end
 
       private
 
       def url_for(path, options={})
-        "#{path}?#{options.map {|k,v| "#{k}=#{v}"}.join("&")}"
+        if options.empty?
+          path
+        else
+          "#{path}?#{options.map {|k,v| "#{k}=#{v}"}.join("&")}"
+        end
       end
 
       def connection
-        @connection ||= Faraday.new(url: 'http://localhost') do |f|
+        @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
           f.adapter   Faraday.default_adapter
           f.use       FaradayMiddleware::EncodeJson
           f.use       Faraday::Response::RaiseError

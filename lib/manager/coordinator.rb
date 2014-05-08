@@ -80,16 +80,20 @@ class Manager
 
       def do_request(index=nil)
         response = if index
+                     Logger.new(STDOUT).info("Requesting GET #{endpoint}?wait=#{timeout}&index=#{index}")
                      connection.get("#{endpoint}?wait=#{timeout}&index=#{index}")
                    else
+                     Logger.new(STDOUT).info("Requesting GET #{endpoint}")
                      connection.get(endpoint)
                    end
 
         return JSON.parse(response.body), response.headers["X-Consul-Index"]
+      rescue
+        Logger.new(STDOUT).warn("Failed to GET #{endpoint}")
       end
 
       def connection
-        @connection ||= Faraday.new(url: 'http://localhost') do |f|
+        @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
           f.adapter   Faraday.default_adapter
           f.use       Faraday::Response::RaiseError
         end

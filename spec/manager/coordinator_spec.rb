@@ -13,11 +13,11 @@ describe Manager::Coordinator do
     it "calls passed block with unique updated response values" do
       called = false
 
-      stub_request(:get, "http://localhost/foo").
+      stub_request(:get, "http://127.0.0.1:8500/foo").
         to_return(body: '["json1"]', headers: {'X-Consul-Index' => 1})
-      stub_request(:get, "http://localhost/foo?wait=10m&index=1").
+      stub_request(:get, "http://127.0.0.1:8500/foo?wait=10m&index=1").
         to_return(body: '["json2"]', headers: {'X-Consul-Index' => 2})
-      stub_request(:get, "http://localhost/foo?wait=10m&index=2").
+      stub_request(:get, "http://127.0.0.1:8500/foo?wait=10m&index=2").
         to_return(body: '["json2"]', headers: {'X-Consul-Index' => 2})
 
       coordinator.add_listener('/foo') do |json|

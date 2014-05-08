@@ -17,6 +17,10 @@ class Manager
 
   attr_accessor :service_name, :service_id, :logger
 
+  def service_id
+    @service_id || service_name
+  end
+
   def consul_agent_options=(hash)
     @consul_agent_options = hash
   end
@@ -67,20 +71,22 @@ class Manager
   end
 
   def run
+    validate!
+
     listeners = []
 
-    agent.begin(@consul_agent_options, @consul_agent_tags)
+    agent.start
     agent.join
     partitions.save(@initial_partitions)
     # health_checks.each { |k,v| agent.register_check(v.as_json) }
 
     # Listen for changes to instance set
-    coordinator.add_listener("http://localhost/v1/catalog/service/#{service_id}") { |json|
+    coordinator.add_listener("/v1/catalog/service/#{service_id}") { |json|
       rebalance
     }
 
     # Listen for changes to partition set
-    coordinator.add_listener("http://localhost/v1/kv/#{service_id}/partitions") { |json|
+    coordinator.add_listener("/v1/kv/#{service_id}/partitions") { |json|
       rebalance
     }
 
@@ -92,12 +98,12 @@ class Manager
     # end
 
     # Listen for disconnection from the cluster
-    coordinator.add_listener("http://localhost/v1/catalog/datacenters") { |json|
+    coordinator.add_listener("/v1/catalog/datacenters") { |json|
       tasks.map { |partition, task| task.terminate } if json.empty?
     }
 
     # Listen for disconnected instances
-    coordinator.add_listener("http://localhost/v1/health/state/critical") { |json|
+    coordinator.add_listener("/v1/health/state/critical") { |json|
       json.select { |h| h["ServiceID"] == service_name }.
         map { |h| h["Node"] }.
         each { |node| agent.force_leave(node) }
@@ -117,6 +123,10 @@ class Manager
 
   private
 
+  def validate!
+    raise ArgumentError, 'Service Name missing' unless @service_name
+  end
+
   def rebalance
     partitions.each do |partition|
       if partition.assigned_to?(self)
@@ -130,7 +140,7 @@ class Manager
 
         else
           # NOTE: Unconstrained object growth ahoy!
-          listeners << Listener.new("http://localhost/v1/kv/#{service_id}/partition/#{partition.name}").each do
+          listeners << Listener.new("/v1/kv/#{service_id}/partition/#{partition.name}").each do
             rebalance
           end
         end
@@ -149,8 +159,7 @@ class Manager
   def agent
     @agent ||= Agent.new do |b|
       b.consul_servers = @consul_servers
-      b.service_name = @service_name
-      b.service_id = @service_id if @service_id
+      b.agent_options = @consul_agent_options
       b.logger = logger
     end
   end
@@ -158,6 +167,8 @@ class Manager
   def partitions
     Partitions.new do |b|
       b.agent = agent
+      b.service_id = service_id
+      b.partition_key = [service_id, :partitions].join('/')
       b.logger = logger
     end
   end

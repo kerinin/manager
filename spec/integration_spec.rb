@@ -1,4 +1,13 @@
 describe "Integration" do
+  before(:each) do
+    Thread.abort_on_exception = true
+    WebMock.allow_net_connect!
+  end
+
+  after(:each) do
+    `consul leave`
+  end
+
   describe "Allocating a single partition to a single instance" do
     let(:acquired) { [] }
     let(:released) { [] }
