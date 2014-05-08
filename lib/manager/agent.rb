@@ -5,13 +5,11 @@ class Manager
     extend Assembler
     
     assemble_from(
-      :consul_servers,
       logger: Logger.new(STDOUT),
       log_progname: self.name,
-      agent_options: {},
     )
 
-    def start
+    def start(agent_options={})
       default_options = {data_dir: './'}
       options = default_options.
         merge(agent_options).
@@ -28,7 +26,8 @@ class Manager
         exec command
       else
         begin
-          res = Request.new(verb: :get, path: '/v1/catalog/datacenters').response
+          res = Request.new(verb: :get, path: '/v1/catalog/services').response
+          sleep 1
         rescue Faraday::Error::ConnectionFailed
           sleep 1
           retry
@@ -36,9 +35,7 @@ class Manager
       end
     end
 
-    def join
-      consul_server = consul_servers.shuffle.first
-
+    def join(consul_server)
       logger.info(log_progname) { "Joining Consul server cluster at '#{consul_server}'" }
 
       Request.new do |b|
@@ -66,14 +63,14 @@ class Manager
       end.response
 
       if res.body
-        return JSON.parse(res.body).map do |json|
+        return JSON.parse(res.body).select { |json| json["Key"] == key.to_s }.map do |json|
           OpenStruct.new(
-            value: Base64.decode64(json["Value"]),
+            value: YAML.load(Base64.decode64(json["Value"])),
             create_index: json["CreateIndex"],
             modify_index: json["ModifyIndex"],
             flags: json["Flags"],
           )
-        end
+        end.first
       end
     end
 
@@ -84,7 +81,9 @@ class Manager
         b.verb = :put
         b.path = "/v1/kv/#{key}"
         b.queryargs = options
-        b.body = value
+
+        # This is being recorded as having surrounding quotation marks...
+        b.body = YAML.dump(value)
 
         yield b if block_given?
       end.response
@@ -192,7 +191,7 @@ class Manager
       def connection
         @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
           f.adapter   Faraday.default_adapter
-          f.use       FaradayMiddleware::EncodeJson
+          # f.use       FaradayMiddleware::EncodeJson
           f.use       Faraday::Response::RaiseError
         end
       end

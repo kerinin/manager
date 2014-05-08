@@ -1,6 +1,6 @@
 describe Manager::Agent do
   # NOTE: This assumes Consul is available locally
-  let(:agent) { Manager::Agent.new(consul_servers: ['127.0.0.1']) }
+  let(:agent) { Manager::Agent.new }
 
   describe "#start" do
     after(:each) do
@@ -16,17 +16,15 @@ describe Manager::Agent do
   end
 
   describe "#join" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1")
-      agent.join
+      agent.join('127.0.0.1')
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1")
     end
 
     it "accepts queryargs" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").with(query: {wan: 1})
-      agent.join do |b|
+      agent.join('127.0.0.1') do |b|
         b.queryargs = {wan: 1}
       end
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").with(query: {wan: 1})
@@ -34,18 +32,16 @@ describe Manager::Agent do
 
     it "returns true on 200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1")
-      expect(agent.join).to be_true
+      expect(agent.join('127.0.0.1')).to be_true
     end
 
     it "raises exception on non-200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").to_return(status: 500)
-      expect { agent.join }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.join('127.0.0.1') }.to raise_error(Faraday::Error::ClientError)
     end
   end
 
   describe "#get_key" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo")
       agent.get_key(:foo)
@@ -89,8 +85,6 @@ describe Manager::Agent do
   end
 
   describe "#put_key" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:put, "http://127.0.0.1:8500/v1/kv/foo")
       agent.put_key(:foo, :bar)
@@ -128,8 +122,6 @@ describe Manager::Agent do
   end
 
   describe "#delete_key" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:delete, "http://127.0.0.1:8500/v1/kv/foo")
       agent.delete_key(:foo)
@@ -160,8 +152,6 @@ describe Manager::Agent do
   end
 
   describe "#register_check" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:put, "http://127.0.0.1:8500/v1/agent/check/register")
       agent.register_check(:foo)
@@ -191,8 +181,6 @@ describe Manager::Agent do
   end
 
   describe "#force_leave" do
-    before(:each) { agent.start }
-
     it "sends expected request" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/force-leave/foo")
       agent.force_leave(:foo)

@@ -9,7 +9,6 @@ require 'logger'
 class Manager
 
   def initialize(options = {})
-    @consul_servers = options[:consul_servers]
     @logger = options[:logger] || Logger.new(STDOUT)
 
     yield self
@@ -19,10 +18,6 @@ class Manager
 
   def service_id
     @service_id || service_name
-  end
-
-  def consul_agent_options=(hash)
-    @consul_agent_options = hash
   end
 
   def consul_agent_tags(tags)
@@ -75,8 +70,6 @@ class Manager
 
     listeners = []
 
-    agent.start
-    agent.join
     partitions.save(@initial_partitions)
     # health_checks.each { |k,v| agent.register_check(v.as_json) }
 
@@ -121,6 +114,12 @@ class Manager
     coordinator.run
   end
 
+  def agent
+    @agent ||= Agent.new do |b|
+      b.logger = logger
+    end
+  end
+
   private
 
   def validate!
@@ -156,19 +155,11 @@ class Manager
     end
   end
 
-  def agent
-    @agent ||= Agent.new do |b|
-      b.consul_servers = @consul_servers
-      b.agent_options = @consul_agent_options
-      b.logger = logger
-    end
-  end
-
   def partitions
     Partitions.new do |b|
       b.agent = agent
       b.service_id = service_id
-      b.partition_key = [service_id, :partitions].join('/')
+      b.partitions_key = [service_id, :partitions].join('/')
       b.logger = logger
     end
   end

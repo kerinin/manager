@@ -50,7 +50,7 @@ require 'manager'
 require 'pagerduty'
 
 # Create a manager and tell it where to find at least one Consul server
-manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
+manager = Manager.new do |m|
   # Consul can manage multiple services, so we'll tell it which one we're defining
   # `service_id` must be unique withing a Consul cluster, but only needs to be 
   # specified if `service_name` (which is required) isn't unique
@@ -143,6 +143,10 @@ manager = Manager.new(consul_servers: [192.168.1.1]) do |m|
     check.ttl = 5.minutes
   end
 end
+
+# If you already have Consul running, you can skip this part
+manager.agent.start(server: true, bootstrap: true)
+manager.agent.join('127.0.0.1')
 
 # All done!  Let's start up the manager and start processing data
 manager.run

@@ -4,19 +4,13 @@ describe "Integration" do
     WebMock.allow_net_connect!
   end
 
-  after(:each) do
-    `consul leave`
-  end
-
   describe "Allocating a single partition to a single instance" do
     let(:acquired) { [] }
     let(:released) { [] }
 
     let(:manager) do
-      Manager.new(consul_servers: ['127.0.0.1']) do |m|
+      Manager.new do |m|
         m.service_name = 'service_name'
-
-        m.consul_agent_options = {server: true, bootstrap: true, node: 'node'}
 
         m.partitions = ['partition']
 

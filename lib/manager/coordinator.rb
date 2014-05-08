@@ -73,6 +73,12 @@ class Manager
             cached = current
             block.call(current)
           end
+
+          # For endpoints that don't support blocking reads, just sleep for a 
+          # minute and then poll again
+          if index.nil?
+            sleep 60
+          end
         end
       end
 

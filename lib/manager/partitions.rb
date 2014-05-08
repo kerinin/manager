@@ -20,7 +20,7 @@ class Manager
     assemble_from(
       :agent,
       :service_id,
-      :partition_key,
+      :partitions_key,
       logger: Logger.new(STDOUT),
       partitioner: ConsistentHashPartitioner,
       log_progname: self.name,
@@ -42,17 +42,19 @@ class Manager
     def save(partition_set)
       logger.info(log_progname) { "Saving partition set '#{partition_set}'" }
 
-      agent.put_key(partition_key, partition_set)
+      agent.put_key(partitions_key, partition_set)
     end
 
     private
 
     def partition_assignments
+      return {} if partition_keys.empty? || nodes.empty?
+
       partitioner.call(partition_keys, nodes)
     end
 
     def partition_keys
-      @partition_set ||= agent.get_key(partition_key)
+      @partition_set ||= agent.get_key(partitions_key)
     end
 
     def nodes
