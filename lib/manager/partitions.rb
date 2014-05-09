@@ -11,6 +11,8 @@ class Manager
 
     module ConsistentHashPartitioner
       def self.call(partitions, nodes)
+        Logger.new(STDOUT).info("Partitioning '#{partitions}' among '#{nodes}'")
+
         ring = ConsistentHashing::Ring.new
         ring.add(nodes)
         Hash[partitions.map { |key| [key, ring.node_for(key).first] }]
@@ -54,7 +56,7 @@ class Manager
     end
 
     def partition_keys
-      @partition_set ||= agent.get_key(partitions_key)
+      @partition_key ||= agent.get_key(partitions_key).value
     end
 
     def nodes

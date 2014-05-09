@@ -7,8 +7,7 @@ describe Manager::Agent do
       `consul leave`
     end
 
-    it "starts the agent" do
-      pending "takes too long"
+    it "starts the agent", integration: true do
       agent.start
 
       expect(`consul info`).to match(/agent/)
@@ -207,7 +206,7 @@ describe Manager::Agent do
   end
 
   describe "#leave" do
-    it "stops the agent" do
+    it "stops the agent", integration: true do
       pending "takes too long"
       agent.start
       agent.leave

@@ -24,15 +24,17 @@ describe "Integration" do
       end
     end
 
-    it "assigns partition" do
+    it "assigns partition", integration: true do
       thr = Thread.new { manager.run }
+      # manager.run
+
       sleep 10
       thr.kill
 
       expect(acquired).to include('partition')
     end
 
-    it "releases partition" do
+    it "releases partition", integration: true do
       thr = Thread.new { manager.run }
       sleep 10
       thr.kill

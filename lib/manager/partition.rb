@@ -22,7 +22,11 @@ class Manager
       logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
-    attr_reader :assigned_to
+    attr_reader :assigned_to, :partition_key
+
+    def consul_path
+      "/v1/kv/#{service_id}/partition/#{partition_key}"
+    end
 
     def assigned_to?(node)
       assigned_to.to_s == node.to_s
@@ -44,7 +48,7 @@ class Manager
       elsif acquired_by
         raise IllegalModificationException, "Tried to acquire partition #{partition_key}, but it's already assigned to #{acquired_by}"
       else
-        agent.set_key(partition_key, service_id) do |b|
+        agent.put_key(partition_key, service_id) do |b|
           b.queryargs = {cas: remote_value["ModifyIndex"]}
         end
       end

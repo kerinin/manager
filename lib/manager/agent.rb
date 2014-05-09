@@ -48,13 +48,21 @@ class Manager
       return true
     end
 
-    def register_service(service)
+    def register_service(service_definition)
+      logger.info(log_progname) { "Regestering service '#{service_definition[:Name]}'" }
+
+      Request.new do |b|
+        b.verb = :put
+        b.path = "/v1/agent/service/register"
+        b.content_type = "application/json"
+        b.body = JSON.dump(service_definition)
+      end.response
     end
 
     def get_key(key, options={})
       logger.info(log_progname) { "Requesting key '#{key}' with options '#{options}'" }
 
-      res = Request.new do |b|
+      response = Request.new do |b|
         b.verb = :get
         b.path = "v1/kv/#{key}"
         b.queryargs = options
@@ -62,8 +70,9 @@ class Manager
         yield b if block_given?
       end.response
 
-      if res.body
-        return JSON.parse(res.body).select { |json| json["Key"] == key.to_s }.map do |json|
+      case response.status.to_s
+      when /2../
+        value = JSON.parse(response.body).select { |json| json["Key"] == key.to_s }.map do |json|
           OpenStruct.new(
             value: YAML.load(Base64.decode64(json["Value"])),
             create_index: json["CreateIndex"],
@@ -71,6 +80,19 @@ class Manager
             flags: json["Flags"],
           )
         end.first
+
+        logger.info(log_progname) { "Key '#{key}' returned value '#{value}'" }
+
+        return value
+      when /404/
+        OpenStruct.new(
+          value: nil,
+          create_index: nil,
+          modify_index: response.headers['X-Consul-Index'],
+          flags: [],
+        )
+      else
+        raise StandardError, 'Something is wrong'
       end
     end
 
@@ -81,6 +103,7 @@ class Manager
         b.verb = :put
         b.path = "/v1/kv/#{key}"
         b.queryargs = options
+        b.content_type = 'text/yaml'
 
         # This is being recorded as having surrounding quotation marks...
         b.body = YAML.dump(value)
@@ -161,6 +184,7 @@ class Manager
         :path,
         queryargs: {},
         body: nil,
+        content_type: nil,
 
         # Blocking queries
         wait: nil,
@@ -174,7 +198,8 @@ class Manager
 
       def response
         connection.send(verb, url_for(path, queryargs)) do |req|
-          req.body = body.to_json if body
+          req.body = body if body
+          req.headers['Content-Type'] = content_type if content_type
         end
       end
 
@@ -192,7 +217,7 @@ class Manager
         @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
           f.adapter   Faraday.default_adapter
           # f.use       FaradayMiddleware::EncodeJson
-          f.use       Faraday::Response::RaiseError
+          # f.use       Faraday::Response::RaiseError
         end
       end
     end

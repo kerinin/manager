@@ -14,7 +14,11 @@ class Manager
     yield self
   end
 
-  attr_accessor :service_name, :service_id, :logger
+  attr_accessor :service_name, :service_id, :service_tags, :service_port, :logger
+
+  def log_progname
+    self.class.name
+  end
 
   def service_id
     @service_id || service_name
@@ -67,6 +71,7 @@ class Manager
 
   def run
     validate!
+    agent.register_service(service_definition)
 
     listeners = []
 
@@ -102,16 +107,12 @@ class Manager
         each { |node| agent.force_leave(node) }
     }
 
-    # NOTE: this probably needs more thought
-    %w(INT TERM).each do |sig|
-      trap sig do
-        tasks.map { |partition, task| task.terminate }
-        # release partitions
-        # leave cluster
-      end
-    end
-
     coordinator.run
+
+  ensure
+    tasks.map { |partition, task| task.terminate }
+    # release partitions
+    # leave cluster
   end
 
   def agent
@@ -122,32 +123,44 @@ class Manager
 
   private
 
+  def my_hostname
+    @hostname ||= `hostname`.chomp
+  end
+
   def validate!
     raise ArgumentError, 'Service Name missing' unless @service_name
   end
 
   def rebalance
+    logger.info(log_progname) { "Rebalancing" }
+
     partitions.each do |partition|
-      if partition.assigned_to?(self)
-        if partition.acquired_by?(self)
+      if partition.assigned_to?(my_hostname)
+        if partition.acquired_by?(my_hostname)
+          logger.info(log_progname) { "Partition '#{partition.partition_key}' already acquired" }
           # Nothing to do
           
         elsif !partition.acquired_by
+          logger.info(log_progname) { "Acquiring partition '#{partition.partition_key}'" }
+
           partition.acquire
           tasks[partition].start
-          partition_listeners.delete(partition.name)
+          coordinator.remove_listener(partition.consul_path)
 
         else
-          # NOTE: Unconstrained object growth ahoy!
-          listeners << Listener.new("/v1/kv/#{service_id}/partition/#{partition.name}").each do
+          logger.info(log_progname) { "Waiting for partition '#{partition.partition_key}' to become available" }
+
+          coordinator.add_listener(partition.consul_path) do
             rebalance
           end
         end
       else
-        if partition.acquired_by?(self)
+        logger.info(log_progname) { "Partition '#{partition.partition_key}' assigned to #{partition.assigned_to} (I'm #{my_hostname})" }
+
+        if partition.acquired_by?(my_hostname)
           tasks[partition].terminate
           partition.release
-          partition_listeners.delete(partition.name)
+          coordinator.remove_listener(partition.consul_path)
         else
           # None of our business
         end
@@ -166,7 +179,7 @@ class Manager
 
   def tasks
     @tasks ||= Hash.new do |hash, key|
-      hash[key] = Tasks.new do |b|
+      hash[key] = Task.new do |b|
         b.partition = key
         b.on_start = @on_acquiring_partition_block
         b.on_terminate = @on_releasing_partition_block
@@ -178,6 +191,15 @@ class Manager
 
   def coordinator
     @coordinator ||= Coordinator.new(logger: logger)
+  end
+
+  def service_definition
+    {
+      ID: service_id,
+      Name: service_name,
+      Tags: service_tags,
+      Port: service_port,
+    }
   end
 end
 

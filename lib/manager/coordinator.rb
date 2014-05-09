@@ -10,11 +10,18 @@ class Manager
     def add_listener(endpoint, &block)
       logger.info(log_progname) { "Adding listener on '#{endpoint}'" }
 
-      threads << Thread.new {
+      threads[endpoint] = Thread.new {
         Listener.new(endpoint: endpoint).each do |json|
           work_queue << [block, json]
         end
       }
+    end
+
+    def remove_listener(endpoint)
+      logger.info(log_progname) { "Removing listener from '#{endpoint}'" }
+
+      listener = threads.delete(endpoint)
+      listener.kill if listener
     end
 
     def run
@@ -42,13 +49,13 @@ class Manager
     def kill
       logger.info(log_progname) { "Killing managed threads" }
 
-      threads.each(&:kill)
+      threads.keys.each { |k| remove_listener(k) }
     end
 
     private
 
     def threads
-      @threads ||= []
+      @threads ||= {}
     end
 
     def work_queue
