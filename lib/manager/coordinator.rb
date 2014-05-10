@@ -8,33 +8,37 @@ class Manager
     )
 
     def add_listener(endpoint, &block)
-      logger.info(log_progname) { "Adding listener on '#{endpoint}'" }
+      return true if threads.has_key?(endpoint)
+
+      logger.debug(log_progname) { "Adding listener on '#{endpoint}'" }
 
       threads[endpoint] = Thread.new {
-        Listener.new(endpoint: endpoint).each do |json|
+        Listener.new(endpoint: endpoint, logger: logger).each do |json|
           work_queue << [block, json]
         end
       }
     end
 
     def remove_listener(endpoint)
-      logger.info(log_progname) { "Removing listener from '#{endpoint}'" }
+      logger.debug(log_progname) { "Removing listener from '#{endpoint}'" }
 
       listener = threads.delete(endpoint)
       listener.kill if listener
     end
 
     def run
-      logger.info(log_progname) { "Starting the work loop" }
+      logger.debug(log_progname) { "Starting the work loop" }
 
       loop do
         drain_work_queue
         sleep 1
       end
+    ensure
+      threads.values.each(&:kill)
     end
 
     def drain_work_queue
-      logger.info(log_progname) { "Draining the work queue" }
+      logger.debug(log_progname) { "Draining the work queue" }
 
       loop do
         value = work_queue.pop(true)
@@ -47,7 +51,7 @@ class Manager
     end
 
     def kill
-      logger.info(log_progname) { "Killing managed threads" }
+      logger.debug(log_progname) { "Killing managed threads" }
 
       threads.keys.each { |k| remove_listener(k) }
     end
@@ -67,24 +71,30 @@ class Manager
 
       assemble_from(
         :endpoint,
-        timeout: '10m',
+        :logger,
+        timeout: 600, # 10 minutes
+        log_progname: self.name,
       )
 
       def each(&block)
-        cached = nil
-        index = nil
+        last_value = nil
+        last_index = nil
+
         loop do
-          current, index = do_request(index)
+          value, index = do_request(last_index)
 
-          if current != cached
-            cached = current
-            block.call(current)
-          end
-
-          # For endpoints that don't support blocking reads, just sleep for a 
-          # minute and then poll again
           if index.nil?
+            if value != last_value
+              last_value = value
+              block.call(value)
+            end
+            # For endpoints that don't support blocking reads, just sleep for a 
+            # minute and then poll again
             sleep 60
+
+          elsif index != last_index
+            last_index = index
+            block.call(value)
           end
         end
       end
@@ -92,23 +102,37 @@ class Manager
       private
 
       def do_request(index=nil)
-        response = if index
-                     Logger.new(STDOUT).info("Requesting GET #{endpoint}?wait=#{timeout}&index=#{index}")
-                     connection.get("#{endpoint}?wait=#{timeout}&index=#{index}")
-                   else
-                     Logger.new(STDOUT).info("Requesting GET #{endpoint}")
-                     connection.get(endpoint)
-                   end
+        if index.nil?
+          logger.debug(log_progname) { "GET #{endpoint}" }
 
-        return JSON.parse(response.body), response.headers["X-Consul-Index"]
-      rescue
-        Logger.new(STDOUT).warn("Failed to GET #{endpoint}")
+          res = connection.get(endpoint)
+        else
+          request_endpoint = "#{endpoint}?wait=#{timeout}s&index=#{index}"
+
+          logger.debug(log_progname) { "GET #{request_endpoint}" }
+
+          res = connection.get(
+            request_endpoint,
+            timeout: timeout + 60,
+          )
+        end
+
+        case res.status.to_s
+        when /2../
+          return JSON.parse(res.body), res.headers["X-Consul-Index"]
+        when /404/
+          return nil, res.headers["X-Consul-Index"]
+          # return nil, 0
+        else
+          raise StandardError, "WTF? #{endpoint} #{res.status} #{res.headers}, #{res.body}"
+        end
+      rescue Faraday::Error::TimeoutError
+        retry
       end
 
       def connection
         @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
           f.adapter   Faraday.default_adapter
-          f.use       Faraday::Response::RaiseError
         end
       end
     end

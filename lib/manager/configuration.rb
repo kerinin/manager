@@ -1,7 +1,7 @@
 class Manager
   class Configuration
     attr_writer :node, :service_id
-    attr_accessor :service_name
+    attr_accessor :service_name, :service_port
     attr_reader :on_acquiring_partition_block, :on_releasing_partition_block
 
     def node
@@ -14,6 +14,10 @@ class Manager
 
     def tags
       @tags ||= []
+    end
+
+    def partitions=(partitions)
+      @partitions = partitions
     end
 
     def partitions
@@ -49,7 +53,7 @@ class Manager
       {
         ID: service_id,
         Name: service_name,
-        Tags: service_tags,
+        Tags: tags,
         Port: service_port,
       }
     end

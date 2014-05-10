@@ -7,10 +7,12 @@ require 'faraday_middleware'
 require 'json'
 require 'logger'
 require 'ostruct'
+require 'pry'
 require 'yaml'
 
-class Manager
+Thread.abort_on_exception = true
 
+class Manager
   def self.pids
     @pids ||= {}
   end
@@ -26,6 +28,8 @@ class Manager
 
   def initialize(options = {})
     @logger = options[:logger] || Logger.new(STDOUT)
+    # @logger.level = Logger::INFO
+    @logger.level = Logger::DEBUG
     @config = Configuration.new
 
     yield @config
@@ -34,7 +38,6 @@ class Manager
   end
 
   def run
-    validate!
     agent.register_service(config.service_definition)
 
     listeners = []
@@ -43,32 +46,54 @@ class Manager
 
     # Listen for changes to instance set
     coordinator.add_listener("/v1/catalog/service/#{config.service_id}") { |json|
+      raise "Unexpected json: #{json}" unless json.kind_of?(Enumerable)
+
+      logger.info(log_progname) { "Cluster membership changed" }
+
       rebalance
     }
 
     # Listen for changes to partition set
-    coordinator.add_listener("/v1/kv/#{config.service_id}/partitions") { |json|
-      rebalance
-    }
+    # coordinator.add_listener("/v1/kv/#{config.service_id}/partitions") { |json|
+    #   raise "Unexpected json: #{json}" unless json.kind_of?(Enumerable)
 
-    # Listen for disconnection from the cluster
-    coordinator.add_listener("/v1/catalog/datacenters") { |json|
-      tasks.map { |partition, task| task.terminate } if json.empty?
-    }
+    #   rebalance
+    # }
 
     # Listen for disconnected instances
-    coordinator.add_listener("/v1/health/state/critical") { |json|
-      json.select { |h| h["ServiceID"] == config.service_id }.
-        map { |h| h["Node"] }.
-        each { |node| agent.force_leave(node) }
+    coordinator.add_listener("/v1/health/service/#{config.service_id}") { |json|
+      raise "Unexpected json: #{json}" unless json.kind_of?(Enumerable)
+
+      logger.info(log_progname) { "Cluster health changed" }
+
+      failing_nodes = json.select do |node|
+        node["Checks"].any? { |check| check["CheckID"] == "serfHealth" && check["Status"] == "critical" }
+      end.map { |node| node["Node"]["Node"] }
+
+      unless failing_nodes.empty?
+        logger.info(log_progname) { "Detected #{failing_nodes.count} failed nodes: #{failing_nodes}" }
+
+        failed_partitions = partitions.select do |partition|
+          failing_nodes.include?(partition.acquired_by)
+        end
+        failed_partitions.each { |p| p.release(true) }
+        logger.debug(log_progname) { "Force-released node's #{failed_partitions.count} partitions: #{failed_partitions.map(&:id)}" }
+
+        failing_nodes.each do |node|
+          agent.force_leave(node)
+        end
+        logger.debug(log_progname) { "Forced failed nodes to leave the cluster" }
+
+        rebalance
+      end
     }
 
     coordinator.run
 
   ensure
     tasks.map { |partition, task| task.terminate }
-    # release partitions
-    # leave cluster
+    partitions.select { |p| p.acquired_by?(config.node) }.each(&:release)
+    agent.deregister_service(config.service_id)
   end
 
   def agent
@@ -79,7 +104,7 @@ class Manager
 
   private
 
-  attr_accessor :config, :service_name, :service_id, :service_tags, :service_port, :logger
+  attr_accessor :config, :logger
 
   def log_progname
     self.class.name
@@ -88,37 +113,59 @@ class Manager
   def rebalance
     logger.info(log_progname) { "Rebalancing" }
 
-    partitions.each do |partition|
+    partition_snapshot = partitions
+
+    partition_snapshot.each do |partition|
       if partition.assigned_to?(config.node)
         if partition.acquired_by?(config.node)
-          logger.info(log_progname) { "Partition '#{partition.id}' already acquired" }
-          # Nothing to do
+          logger.debug(log_progname) { "Partition '#{partition.id}' already acquired" }
+
+          tasks[partition.id] ||= Task.new do |b|
+            b.partition = partition
+            b.config = config
+            b.logger = logger
+          end
+          tasks[partition.id].start unless tasks[partition.id].started?
           
         elsif !partition.acquired_by
-          logger.info(log_progname) { "Acquiring partition '#{partition.id}'" }
+          logger.debug(log_progname) { "Acquiring partition '#{partition.id}'" }
 
-          partition.acquire
-          tasks[partition].start
           coordinator.remove_listener(partition.consul_path)
+          partition.acquire
+
+          tasks[partition.id] ||= Task.new do |b|
+            b.partition = partition
+            b.config = config
+            b.logger = logger
+          end
+          tasks[partition.id].start
 
         else
-          logger.info(log_progname) { "Waiting for partition '#{partition.id}' to become available" }
+          logger.debug(log_progname) { "Waiting for partition '#{partition.id}' to become available" }
 
           coordinator.add_listener(partition.consul_path) do
+            logger.info(log_progname) { "Value of partition '#{partition.id}' changed" }
+
             rebalance
           end
         end
       else
-        logger.info(log_progname) { "Partition '#{partition.id}' assigned to #{partition.assigned_to} (I'm #{config.node})" }
-
         if partition.acquired_by?(config.node)
-          tasks[partition].terminate
-          partition.release
+          logger.debug(log_progname) { "Releasing partition '#{partition.id}' to '#{partition.assigned_to}' (I'm #{config.node})" }
+
           coordinator.remove_listener(partition.consul_path)
+          tasks[partition.id].terminate if tasks.has_key?(partition.id)
+          partition.release
         else
-          # None of our business
+          logger.debug(log_progname) { "Partition '#{partition.id}' assigned to '#{partition.assigned_to}' (I'm #{config.node})" }
+
+          tasks[partition.id].terminate if tasks.has_key?(partition.id) && tasks[partition.id].started?
         end
       end
+    end
+
+    tasks.each do |partition_id, task|
+      task.terminate unless partition_snapshot.map(&:id).include?(partition_id)
     end
   end
 
@@ -131,16 +178,7 @@ class Manager
   end
 
   def tasks
-    @tasks ||= Hash.new do |hash, key|
-      hash[key] = Task.new do |b|
-        b.partition = key
-        b.config = config
-        # b.on_start = @on_acquiring_partition_block
-        # b.on_terminate = @on_releasing_partition_block
-        # b.health_checks = health_checks
-        b.logger = logger
-      end
-    end
+    @tasks ||= {}
   end
 
   def coordinator
@@ -150,6 +188,7 @@ end
 
 require 'manager/agent'
 require 'manager/coordinator'
+require 'manager/configuration'
 require 'manager/partition'
 require 'manager/partitions'
 require 'manager/task'

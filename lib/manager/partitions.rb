@@ -11,11 +11,9 @@ class Manager
 
     module ConsistentHashPartitioner
       def self.call(partitions, nodes)
-        Logger.new(STDOUT).info("Partitioning '#{partitions}' among '#{nodes}'")
-
         ring = ConsistentHashing::Ring.new
-        ring.add(nodes)
-        Hash[partitions.map { |key| [key, ring.node_for(key).first] }]
+        nodes.each { |node| ring.add(node) }
+        Hash[partitions.map { |key| [key, ring.node_for(key)] }]
       end
     end
 
@@ -23,16 +21,17 @@ class Manager
       :agent,
       :config,
       logger: Logger.new(STDOUT),
-      partitioner: ConsistentHashPartitioner,
+      # partitioner: ConsistentHashPartitioner,
+      partitioner: LinearPartitioner,
       log_progname: self.name,
     )
 
     def each(&block)
       partition_assignments.each do |id, node_id|
         partition = Partition.new(
-          service_id: config.service_id,
-          agent: agent,
           id: id,
+          agent: agent,
+          config: config,
           assigned_to: node_id,
           logger: logger,
         )
@@ -41,7 +40,7 @@ class Manager
     end
 
     def save(partition_set)
-      logger.info(log_progname) { "Saving partition set '#{partition_set}'" }
+      logger.debug(log_progname) { "Saving partition set '#{partition_set}'" }
 
       agent.put_key(partitions_key, partition_set)
     end

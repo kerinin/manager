@@ -9,12 +9,18 @@ class Manager
       log_progname: self.name,
     )
 
+    def started?
+      @started
+    end
+
     def start
       logger.info(log_progname) { "Starting task for partition '#{partition.id}'" }
 
       if config.on_acquiring_partition_block
         config.on_acquiring_partition_block.call partition.id
       end
+
+      @started = true
     end
 
     def terminate
@@ -23,6 +29,8 @@ class Manager
       if config.on_releasing_partition_block
         config.on_releasing_partition_block.call partition.id
       end
+      
+      @started = false
     end
   end
 end

@@ -22,8 +22,6 @@ class Manager
       # command = "consul agent #{options} > /dev/null 2>&1"
       command = "consul agent #{options}"
 
-      logger.info(log_progname) { "Starting agent with `#{command}`" }
-
       pid = Process.fork
       if pid.nil?
         exec command
@@ -36,11 +34,12 @@ class Manager
           retry
         end
       end
+
+      logger.info(log_progname) { "Started agent with `#{command}`" }
+      true
     end
 
     def join(consul_server)
-      logger.info(log_progname) { "Joining Consul server cluster at '#{consul_server}'" }
-
       res = Request.new do |b|
         b.verb = :get
         b.path = "/v1/agent/join/#{consul_server}"
@@ -48,12 +47,12 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res)
+      ret = handle_response(res)
+      logger.info(log_progname) { "Joined Consul server cluster at '#{consul_server}'" }
+      ret
     end
 
     def register_service(service_definition)
-      logger.info(log_progname) { "Regestering service '#{service_definition[:Name]}'" }
-
       res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/agent/service/register"
@@ -63,12 +62,25 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res)
+      ret = handle_response(res)
+      logger.info(log_progname) { "Registered service '#{service_definition[:Name]}'" }
+      ret
+    end
+
+    def deregister_service(service_id)
+      res = Request.new do |b|
+        b.verb = :put
+        b.path = "/v1/agent/service/deregister/#{service_id}"
+
+        yield b if block_given?
+      end.response
+
+      ret = handle_response(res)
+      logger.info(log_progname) { "Deregestered service '#{service_id}'" }
+      ret
     end
 
     def get_key(key, options={})
-      logger.info(log_progname) { "Requesting key '#{key}' with options '#{options}'" }
-
       res = Request.new do |b|
         b.verb = :get
         b.path = "v1/kv/#{key}"
@@ -77,7 +89,7 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res) do |h|
+      ret = handle_response(res) do |h|
         h.status /2../ do
           value = JSON.parse(res.body).select { |json| json["Key"] == key.to_s }.map do |json|
             OpenStruct.new(
@@ -88,8 +100,6 @@ class Manager
             )
           end.first
 
-          logger.info(log_progname) { "Key '#{key}' returned value '#{value}'" }
-
           value
         end
 
@@ -97,16 +107,17 @@ class Manager
           OpenStruct.new(
             value: nil,
             create_index: nil,
-            modify_index: res.headers['X-Consul-Index'],
+            modify_index: 0,
             flags: [],
           )
         end
       end
+
+      logger.debug(log_progname) { "Got key '#{key}' with value '#{ret}'" }
+      ret
     end
 
     def put_key(key, value, options={})
-      logger.info(log_progname) { "Setting key '#{key}'='#{value}' with options '#{options}'" }
-
       res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/kv/#{key}"
@@ -121,15 +132,18 @@ class Manager
 
       handle_response(res) do |h|
         h.status /2../ do
-          raise CASException if res.body == 'false'
+          if res.body.chomp == 'false'
+            raise CASException 
+          end
           true
         end
       end
+
+      logger.debug(log_progname) { "Set key '#{key}' to value '#{value}'" }
+      true 
     end
 
     def delete_key(key, options={})
-      logger.info(log_progname) { "Deleting key '#{key}' with options '#{options}'" }
-
       res = Request.new do |b|
         b.verb = :delete
         b.path = "/v1/kv/#{key}"
@@ -138,12 +152,12 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res)
+      ret = handle_response(res)
+      logger.info(log_progname) { "Deleted key '#{key}'" }
+      ret
     end
 
     def get_service_health(service_id, options={})
-      logger.info(log_progname) { "Getting health status for service '#{service_id}'" }
-
       res = Request.new do |b|
         b.verb = :get
         b.path = "v1/health/service/#{service_id}"
@@ -152,16 +166,17 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res) do |h|
+      ret = handle_response(res) do |h|
         h.status /2../ do
           JSON.parse(res.body) if res.body
         end
       end
+
+      logger.debug(log_progname) { "Got health status for service '#{service_id}': '#{ret}'" }
+      ret
     end
 
     def register_check(check)
-      logger.info(log_progname) { "Registering check '#{check}'" }
-
       res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/agent/check/register"
@@ -170,12 +185,12 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res)
+      ret = handle_response(res)
+      logger.info(log_progname) { "Registered check '#{check}'" }
+      ret
     end
 
     def force_leave(node)
-      logger.info(log_progname) { "Forcing node '#{node}' to leave the Consul cluster" }
-
       res = Request.new do |b|
         b.verb = :get
         b.path = "/v1/agent/force-leave/#{node}"
@@ -183,13 +198,15 @@ class Manager
         yield b if block_given?
       end.response
 
-      handle_response(res)
+      ret = handle_response(res)
+      logger.info(log_progname) { "Forced node '#{node}' to leave the Consul cluster" }
+      ret
     end
 
     def leave
-      logger.info(log_progname) { "Leaving the Consul cluster" }
-
       `consul leave`
+
+      logger.info(log_progname) { "Left the Consul cluster" }
     end
 
     private

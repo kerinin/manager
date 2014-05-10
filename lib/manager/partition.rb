@@ -16,8 +16,8 @@ class Manager
 
     assemble_from(
       :id,
-      :service_id,
       :agent,
+      :config,
       :assigned_to,
       logger: Logger.new(STDOUT),
       log_progname: self.name,
@@ -25,7 +25,7 @@ class Manager
     attr_reader :assigned_to, :id
 
     def consul_path
-      "/v1/kv/#{service_id}/partition/#{id}"
+      "http://localhost:8500/v1/kv/#{partition_key}"
     end
 
     def assigned_to?(node)
@@ -41,37 +41,39 @@ class Manager
     end
 
     def acquire
-      logger.info(log_progname) { "Attempting to acquire partition #{id}" }
+      logger.debug(log_progname) { "Attempting to acquire partition #{id}" }
 
-      if acquired_by?(service_id)
+      if acquired_by?(config.node)
         return true
       elsif acquired_by
         raise IllegalModificationException, "Tried to acquire partition #{id}, but it's already assigned to #{acquired_by}"
       else
-        agent.put_key(id, service_id) do |b|
-          b.queryargs = {cas: remote_value["ModifyIndex"]}
-        end
+        agent.put_key(partition_key, config.node, cas: remote_value.modify_index)
       end
     end
 
-    def release
-      logger.info(log_progname) { "Attempting to release partition #{id}" }
+    def release(force = false)
+      logger.debug(log_progname) { "Attempting to release partition #{id}" }
 
       if !acquired_by
         return true
-      elsif !acquired_by?(service_id)
-        raise IllegalModificationException, "Tried to release partition #{id}, but it's assigned to #{acquired_by}"
+      elsif !acquired_by?(config.node) && !force
+        logger.warn(log_progname) { "Tried to release partition #{id}, but it's assigned to #{acquired_by}" }
       else
-        agent.put_key(id, nil) do |b|
-          b.queryargs = {cas: remote_value["ModifyIndex"]}
+        agent.put_key(partition_key, nil) do |b|
+          b.queryargs = {cas: remote_value.modify_index}
         end
       end
     end
 
     private
 
+    def partition_key
+      @paritition_key ||= "#{config.service_id}/p_#{id}"
+    end
+
     def remote_value
-      @remote_value = agent.get_key(id)
+      @remote_value ||= agent.get_key(partition_key)
     end
   end
 end
