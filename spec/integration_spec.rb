@@ -4,7 +4,7 @@ describe "Integration" do
     WebMock.allow_net_connect!
   end
 
-  describe "Allocating a single partition to a single instance" do
+  context "with a single partition and a single instance" do
     let(:acquired) { [] }
     let(:released) { [] }
 
@@ -43,4 +43,32 @@ describe "Integration" do
       expect(released).to include('partition')
     end
   end
+end
+
+describe "Rebalance" do
+  it "acquires available partitions"
+  it "releases partitions no longer assigned"
+end
+
+describe "Update Partitions" do
+  it "allocates new partitions to instances"
+  it "terminates removed partitions"
+end
+
+describe "Enter Cluster" do
+  it "allocates partitions to new instance"
+  it "terminates partitions from existing instances"
+end
+
+describe "Leave Cluster" do
+  it "allocates partitions to active instances"
+  it "terminates partitions from exiting instances"
+end
+
+describe "Remote Failure" do
+  it "allocates failed partitions to healthy instances"
+end
+
+describe "Local Failure" do
+  it "terminates tasks"
 end

@@ -21,19 +21,18 @@ class Manager
 
     assemble_from(
       :agent,
-      :service_id,
-      :partitions_key,
+      :config,
       logger: Logger.new(STDOUT),
       partitioner: ConsistentHashPartitioner,
       log_progname: self.name,
     )
 
     def each(&block)
-      partition_assignments.each do |partition_key, node_id|
+      partition_assignments.each do |id, node_id|
         partition = Partition.new(
-          service_id: service_id,
+          service_id: config.service_id,
           agent: agent,
-          partition_key: partition_key,
+          id: id,
           assigned_to: node_id,
           logger: logger,
         )
@@ -49,19 +48,25 @@ class Manager
 
     private
 
-    def partition_assignments
-      return {} if partition_keys.empty? || nodes.empty?
-
-      partitioner.call(partition_keys, nodes)
+    # The Consul key name where the set of partitions is stored
+    def partitions_key
+      @partitions_key ||= [config.service_id, :partitions].join('/')
     end
 
-    def partition_keys
-      @partition_key ||= agent.get_key(partitions_key).value
+    # The set of partitions to be allocated
+    def partition_ids
+      @partition_ids ||= agent.get_key(partitions_key).value
+    end
+
+    def partition_assignments
+      return {} if partition_ids.empty? || nodes.empty?
+
+      partitioner.call(partition_ids, nodes)
     end
 
     def nodes
       @nodes ||= agent.
-        get_service_health(service_id).
+        get_service_health(config.service_id).
         select { |h| h["Checks"].all? { |c| c["Status"] == "passing" } }.
         map { |h| h["Node"]["Node"] }
     end

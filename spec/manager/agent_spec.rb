@@ -36,19 +36,19 @@ describe Manager::Agent do
 
     it "raises exception on non-200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").to_return(status: 500)
-      expect { agent.join('127.0.0.1') }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.join('127.0.0.1') }.to raise_error(Manager::Agent::HTTPServerError)
     end
   end
 
   describe "#get_key" do
     it "sends expected request" do
-      stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo")
+      stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").to_return(body: '[]')
       agent.get_key(:foo)
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/kv/foo")
     end
 
     it "accepts queryargs" do
-      stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'})
+      stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'}).to_return(body: '[]')
       agent.get_key(:foo) do |b|
         b.queryargs = {dc: 'dc'}
       end
@@ -74,12 +74,12 @@ describe Manager::Agent do
       stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").
         to_return(body: JSON.dump(body))
 
-      expect(agent.get_key(:foo)).to eq([response])
+      expect(agent.get_key(:foo)).to eq(response)
     end
 
     it "raises exception on non-200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").to_return(status: 500)
-      expect { agent.get_key(:foo) }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.get_key(:foo) }.to raise_error(Manager::Agent::HTTPServerError)
     end
   end
 
@@ -87,7 +87,7 @@ describe Manager::Agent do
     it "sends expected request" do
       stub_request(:put, "http://127.0.0.1:8500/v1/kv/foo")
       agent.put_key(:foo, :bar)
-      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/kv/foo").with(body: '"bar"')
+      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/kv/foo").with(body: YAML.dump(:bar))
     end
 
     it "accepts queryargs" do
@@ -95,7 +95,7 @@ describe Manager::Agent do
       agent.put_key(:foo, :bar) do |b|
         b.queryargs = {dc: 'dc'}
       end
-      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/kv/foo").with(body: '"bar"', query: {dc: 'dc'})
+      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/kv/foo").with(body: YAML.dump(:bar), query: {dc: 'dc'})
     end
 
     it "returns true on 200 response" do
@@ -109,7 +109,7 @@ describe Manager::Agent do
       stub_request(:put, "http://127.0.0.1:8500/v1/kv/foo").
         to_return(status: 500)
 
-      expect { agent.put_key(:foo, :bar) }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.put_key(:foo, :bar) }.to raise_error(Manager::Agent::HTTPServerError)
     end
 
     it "raises exception on CAS failure" do
@@ -146,15 +146,44 @@ describe Manager::Agent do
       stub_request(:delete, "http://127.0.0.1:8500/v1/kv/foo").
         to_return(status: 500)
 
-      expect { agent.delete_key(:foo) }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.delete_key(:foo) }.to raise_error(Manager::Agent::HTTPServerError)
+    end
+  end
+
+  describe "#register_service" do
+    it "sends expected request" do
+      stub_request(:put, "http://127.0.0.1:8500/v1/agent/service/register")
+      agent.register_service(Name: :service)
+      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/service/register").with(body: JSON.dump(Name: :service))
+    end
+
+    it "accepts queryargs" do
+      stub_request(:put, "http://127.0.0.1:8500/v1/agent/service/register").with(query: {dc: 'dc'})
+      agent.register_service(Name: :service) do |b|
+        b.queryargs = {dc: 'dc'}
+      end
+      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/service/register").with(query: {dc: 'dc'})
+    end
+
+    it "returns true on 200 response" do
+      stub_request(:put, "http://127.0.0.1:8500/v1/agent/service/register")
+
+      expect(agent.register_service(Name: :service)).to be_true
+    end
+
+    it "raises exception on non-200 response" do
+      stub_request(:put, "http://127.0.0.1:8500/v1/agent/service/register").
+        to_return(status: 500)
+
+      expect { agent.register_service(Name: :service) }.to raise_error(Manager::Agent::HTTPServerError)
     end
   end
 
   describe "#register_check" do
     it "sends expected request" do
       stub_request(:put, "http://127.0.0.1:8500/v1/agent/check/register")
-      agent.register_check(:foo)
-      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/check/register").with(body: '"foo"')
+      agent.register_check({foo: :bar})
+      expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/check/register").with(body: JSON.dump(foo: :bar))
     end
 
     it "accepts queryargs" do
@@ -175,7 +204,7 @@ describe Manager::Agent do
       stub_request(:put, "http://127.0.0.1:8500/v1/agent/check/register").
         to_return(status: 500)
 
-      expect { agent.register_check(:foo) }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.register_check(:foo) }.to raise_error(Manager::Agent::HTTPServerError)
     end
   end
 
@@ -201,7 +230,7 @@ describe Manager::Agent do
 
     it "raises exception on non-200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/force-leave/foo").to_return(status: 500)
-      expect { agent.force_leave(:foo) }.to raise_error(Faraday::Error::ClientError)
+      expect { agent.force_leave(:foo) }.to raise_error(Manager::Agent::HTTPServerError)
     end
   end
 

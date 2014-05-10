@@ -1,66 +1,21 @@
-require "assembler"
-require "manager/version"
-require "consistent_hashing"
+require 'assembler'
+require 'base64'
+require 'manager/version'
+require 'consistent_hashing'
 require 'faraday'
 require 'faraday_middleware'
 require 'json'
 require 'logger'
+require 'ostruct'
+require 'yaml'
 
 class Manager
 
-  def initialize(options = {})
-    @logger = options[:logger] || Logger.new(STDOUT)
-
-    yield self
-  end
-
-  attr_accessor :service_name, :service_id, :service_tags, :service_port, :logger
-
-  def log_progname
-    self.class.name
-  end
-
-  def service_id
-    @service_id || service_name
-  end
-
-  def consul_agent_tags(tags)
-    @consul_agent_tags = tags
-  end
-
-  def partitions=(partitions)
-    @initial_partitions = partitions
-  end
-
-  def on_acquiring_partition(&block)
-    @on_acquiring_partition_block = block
-  end
-
-  def on_releasing_partition(&block)
-    @on_releasing_partition_block = block
-  end
-
-  # def health_checks
-  #   @health_checks ||= {}
-  # end
-
-  # def health_check_script(name, &block)
-  #   @script_health_checks ||= []
-  #   check = ScriptHealthCheck.new(name, &block)
-  #   health_checks[check.id] = check
-  # end
-
-  # def health_check_ttl(name, &block)
-  #   @ttl_health_checks ||= []
-  #   check = TTLHealthCheck.new(name, &block)
-  #   health_checks[check.id] = check
-  # end
-
-  def pids
+  def self.pids
     @pids ||= {}
   end
 
-  def exec(name, script)
+  def self.exec(name, script)
     pid = Process.fork
     if pid.nil?
       exec script
@@ -69,31 +24,32 @@ class Manager
     end
   end
 
+  def initialize(options = {})
+    @logger = options[:logger] || Logger.new(STDOUT)
+    @config = Configuration.new
+
+    yield @config
+
+    @config.validate!
+  end
+
   def run
     validate!
-    agent.register_service(service_definition)
+    agent.register_service(config.service_definition)
 
     listeners = []
 
-    partitions.save(@initial_partitions)
-    # health_checks.each { |k,v| agent.register_check(v.as_json) }
+    partitions.save(config.partitions)
 
     # Listen for changes to instance set
-    coordinator.add_listener("/v1/catalog/service/#{service_id}") { |json|
+    coordinator.add_listener("/v1/catalog/service/#{config.service_id}") { |json|
       rebalance
     }
 
     # Listen for changes to partition set
-    coordinator.add_listener("/v1/kv/#{service_id}/partitions") { |json|
+    coordinator.add_listener("/v1/kv/#{config.service_id}/partitions") { |json|
       rebalance
     }
-
-    # Listen for changes to health checks
-    # listeners << Listener.new("http://localhost/v1/agent/checks").each do |json|
-    #   json.each do |k,v|
-    #     @health_checks[k].handle(v) if @health_checks.has_key?(k)
-    #   end
-    # end
 
     # Listen for disconnection from the cluster
     coordinator.add_listener("/v1/catalog/datacenters") { |json|
@@ -102,7 +58,7 @@ class Manager
 
     # Listen for disconnected instances
     coordinator.add_listener("/v1/health/state/critical") { |json|
-      json.select { |h| h["ServiceID"] == service_name }.
+      json.select { |h| h["ServiceID"] == config.service_id }.
         map { |h| h["Node"] }.
         each { |node| agent.force_leave(node) }
     }
@@ -123,41 +79,39 @@ class Manager
 
   private
 
-  def my_hostname
-    @hostname ||= `hostname`.chomp
-  end
+  attr_accessor :config, :service_name, :service_id, :service_tags, :service_port, :logger
 
-  def validate!
-    raise ArgumentError, 'Service Name missing' unless @service_name
+  def log_progname
+    self.class.name
   end
 
   def rebalance
     logger.info(log_progname) { "Rebalancing" }
 
     partitions.each do |partition|
-      if partition.assigned_to?(my_hostname)
-        if partition.acquired_by?(my_hostname)
-          logger.info(log_progname) { "Partition '#{partition.partition_key}' already acquired" }
+      if partition.assigned_to?(config.node)
+        if partition.acquired_by?(config.node)
+          logger.info(log_progname) { "Partition '#{partition.id}' already acquired" }
           # Nothing to do
           
         elsif !partition.acquired_by
-          logger.info(log_progname) { "Acquiring partition '#{partition.partition_key}'" }
+          logger.info(log_progname) { "Acquiring partition '#{partition.id}'" }
 
           partition.acquire
           tasks[partition].start
           coordinator.remove_listener(partition.consul_path)
 
         else
-          logger.info(log_progname) { "Waiting for partition '#{partition.partition_key}' to become available" }
+          logger.info(log_progname) { "Waiting for partition '#{partition.id}' to become available" }
 
           coordinator.add_listener(partition.consul_path) do
             rebalance
           end
         end
       else
-        logger.info(log_progname) { "Partition '#{partition.partition_key}' assigned to #{partition.assigned_to} (I'm #{my_hostname})" }
+        logger.info(log_progname) { "Partition '#{partition.id}' assigned to #{partition.assigned_to} (I'm #{config.node})" }
 
-        if partition.acquired_by?(my_hostname)
+        if partition.acquired_by?(config.node)
           tasks[partition].terminate
           partition.release
           coordinator.remove_listener(partition.consul_path)
@@ -171,8 +125,7 @@ class Manager
   def partitions
     Partitions.new do |b|
       b.agent = agent
-      b.service_id = service_id
-      b.partitions_key = [service_id, :partitions].join('/')
+      b.config = config
       b.logger = logger
     end
   end
@@ -181,8 +134,9 @@ class Manager
     @tasks ||= Hash.new do |hash, key|
       hash[key] = Task.new do |b|
         b.partition = key
-        b.on_start = @on_acquiring_partition_block
-        b.on_terminate = @on_releasing_partition_block
+        b.config = config
+        # b.on_start = @on_acquiring_partition_block
+        # b.on_terminate = @on_releasing_partition_block
         # b.health_checks = health_checks
         b.logger = logger
       end
@@ -191,15 +145,6 @@ class Manager
 
   def coordinator
     @coordinator ||= Coordinator.new(logger: logger)
-  end
-
-  def service_definition
-    {
-      ID: service_id,
-      Name: service_name,
-      Tags: service_tags,
-      Port: service_port,
-    }
   end
 end
 

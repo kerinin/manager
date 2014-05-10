@@ -1,9 +1,12 @@
 describe Manager::Partitions do
+  let(:config) do
+    double("Config", service_id: :service_id)
+  end
+
   let(:partitions) do
     Manager::Partitions.new do |b|
       b.agent = fake_agent
-      b.service_id = :service_id
-      b.partition_key = :partition_key
+      b.config = config
       b.partitioner = Manager::Partitions::LinearPartitioner
     end
   end
@@ -26,7 +29,7 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: ['partition1', 'partition2'],
+          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
         )
       end
 
@@ -63,7 +66,7 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: ['partition1', 'partition2'],
+          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
         )
       end
 
@@ -100,7 +103,7 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: ['partition1', 'partition2'],
+          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
         )
       end
 

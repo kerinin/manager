@@ -4,22 +4,25 @@ class Manager
 
     assemble_from(
       :partition,
-      :on_start,
-      :on_terminate,
+      :config,
       logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
 
     def start
-      logger.info(log_progname) { "Starting task for partition '#{partition}'" }
+      logger.info(log_progname) { "Starting task for partition '#{partition.id}'" }
 
-      on_start.call partition.partition_key
+      if config.on_acquiring_partition_block
+        config.on_acquiring_partition_block.call partition.id
+      end
     end
 
     def terminate
-      logger.info(log_progname) { "Terminating task for partition '#{partition}'" }
+      logger.info(log_progname) { "Terminating task for partition '#{partition.id}'" }
 
-      on_terminate.call partition.partition_key
+      if config.on_releasing_partition_block
+        config.on_releasing_partition_block.call partition.id
+      end
     end
   end
 end

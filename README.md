@@ -82,7 +82,7 @@ manager = Manager.new do |m|
     # The manager exposes #exec, which executes arbitrary commands in a
     # sub-process.  This ensures that if the manager daemon dies, the processes
     # will be killed as well.
-    m.exec(
+    Manager.exec(
       name: partition,  # The name allows us to lookup the PID later
       command: 'bundle exec ruby process_kafka_partition.rb --partition #{partition}'
     )
@@ -93,7 +93,7 @@ manager = Manager.new do |m|
     # We'll allow the process to exit gracefully.  Manager tracks the PID's of
     # each process created with #exec, you can get them by calling #pid with the
     # name provided to #exec
-    `kill(#{m.pids[partition]}, SIGTERM)`
+    `kill(#{Manager.pids[partition]}, SIGTERM)`
   end
 
   # Let's use Consul's health checks to make sure the process is responsive.
@@ -109,7 +109,7 @@ manager = Manager.new do |m|
     check.notes = "Sends SIGUSR1 to the process and fails if the process doesn't respond"
 
     # This is the script that will be run.  Our process should return 0 if it's OK
-    check.script = "kill(#{m.pids[partition]}, SIGUSR1)"
+    check.script = "kill(#{Manager.pids[partition]}, SIGUSR1)"
 
     # We'll call this script once a minute
     check.interval = 1.minute

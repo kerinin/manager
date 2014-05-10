@@ -1,9 +1,21 @@
 describe Manager::Task do
+  let(:config) do
+    double(
+      "Config", 
+      on_acquiring_partition_block: on_start,
+      on_releasing_partition_block: on_terminate,
+    )
+  end
+
+  let(:partition) do 
+    double("Partition", id: 'partition1')
+  end
+
   let(:on_start) { double('StartBlock', call: true) }
   let(:on_terminate) { double('TerminateBlock', call: true) }
 
   let(:task) do
-    Manager::Task.new(partition: 'partition1', on_start: on_start, on_terminate: on_terminate)
+    Manager::Task.new(partition: partition, config: config)
   end
 
   describe "#start" do

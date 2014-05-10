@@ -1,5 +1,8 @@
 class Manager
   class Agent
+    class HTTPRedirectException < StandardError; end
+    class HTTPClientError < StandardError; end
+    class HTTPServerError < StandardError; end
     class CASException < StandardError; end
 
     extend Assembler
@@ -38,31 +41,35 @@ class Manager
     def join(consul_server)
       logger.info(log_progname) { "Joining Consul server cluster at '#{consul_server}'" }
 
-      Request.new do |b|
+      res = Request.new do |b|
         b.verb = :get
         b.path = "/v1/agent/join/#{consul_server}"
 
         yield b if block_given?
       end.response
 
-      return true
+      handle_response(res)
     end
 
     def register_service(service_definition)
       logger.info(log_progname) { "Regestering service '#{service_definition[:Name]}'" }
 
-      Request.new do |b|
+      res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/agent/service/register"
         b.content_type = "application/json"
         b.body = JSON.dump(service_definition)
+
+        yield b if block_given?
       end.response
+
+      handle_response(res)
     end
 
     def get_key(key, options={})
       logger.info(log_progname) { "Requesting key '#{key}' with options '#{options}'" }
 
-      response = Request.new do |b|
+      res = Request.new do |b|
         b.verb = :get
         b.path = "v1/kv/#{key}"
         b.queryargs = options
@@ -70,29 +77,30 @@ class Manager
         yield b if block_given?
       end.response
 
-      case response.status.to_s
-      when /2../
-        value = JSON.parse(response.body).select { |json| json["Key"] == key.to_s }.map do |json|
+      handle_response(res) do |h|
+        h.status /2../ do
+          value = JSON.parse(res.body).select { |json| json["Key"] == key.to_s }.map do |json|
+            OpenStruct.new(
+              value: YAML.load(Base64.decode64(json["Value"])),
+              create_index: json["CreateIndex"],
+              modify_index: json["ModifyIndex"],
+              flags: json["Flags"],
+            )
+          end.first
+
+          logger.info(log_progname) { "Key '#{key}' returned value '#{value}'" }
+
+          value
+        end
+
+        h.status /404/ do
           OpenStruct.new(
-            value: YAML.load(Base64.decode64(json["Value"])),
-            create_index: json["CreateIndex"],
-            modify_index: json["ModifyIndex"],
-            flags: json["Flags"],
+            value: nil,
+            create_index: nil,
+            modify_index: res.headers['X-Consul-Index'],
+            flags: [],
           )
-        end.first
-
-        logger.info(log_progname) { "Key '#{key}' returned value '#{value}'" }
-
-        return value
-      when /404/
-        OpenStruct.new(
-          value: nil,
-          create_index: nil,
-          modify_index: response.headers['X-Consul-Index'],
-          flags: [],
-        )
-      else
-        raise StandardError, 'Something is wrong'
+        end
       end
     end
 
@@ -111,22 +119,26 @@ class Manager
         yield b if block_given?
       end.response
 
-      raise CASException if res.body == 'false'
-
-      return true
+      handle_response(res) do |h|
+        h.status /2../ do
+          raise CASException if res.body == 'false'
+          true
+        end
+      end
     end
 
     def delete_key(key, options={})
       logger.info(log_progname) { "Deleting key '#{key}' with options '#{options}'" }
 
-      Request.new do |b|
+      res = Request.new do |b|
         b.verb = :delete
         b.path = "/v1/kv/#{key}"
         b.queryargs = options
 
         yield b if block_given?
       end.response
-      return true
+
+      handle_response(res)
     end
 
     def get_service_health(service_id, options={})
@@ -140,40 +152,80 @@ class Manager
         yield b if block_given?
       end.response
 
-      return JSON.parse(res.body) if res.body
+      handle_response(res) do |h|
+        h.status /2../ do
+          JSON.parse(res.body) if res.body
+        end
+      end
     end
 
     def register_check(check)
       logger.info(log_progname) { "Registering check '#{check}'" }
 
-      Request.new do |b|
+      res = Request.new do |b|
         b.verb = :put
         b.path = "/v1/agent/check/register"
-        b.body = check
+        b.body = JSON.dump(check)
 
         yield b if block_given?
       end.response
 
-      return true
+      handle_response(res)
     end
 
     def force_leave(node)
       logger.info(log_progname) { "Forcing node '#{node}' to leave the Consul cluster" }
 
-      Request.new do |b|
+      res = Request.new do |b|
         b.verb = :get
         b.path = "/v1/agent/force-leave/#{node}"
 
         yield b if block_given?
       end.response
 
-      return true
+      handle_response(res)
     end
 
     def leave
       logger.info(log_progname) { "Leaving the Consul cluster" }
 
       `consul leave`
+    end
+
+    private
+
+    def handle_response(response)
+      if block_given?
+        dsl = HandlerDSL.new
+        yield dsl
+
+        dsl.handlers.each do |regex, block|
+          if response.status.to_s =~ regex
+            return block.call
+          end
+        end
+      end
+
+      case response.status.to_s
+      when /2../
+        return true
+      when /3../
+        raise HTTPRedirectException, "Response redirected: #{response.headers}"
+      when /4../
+        raise HTTPClientError, "Client Error: #{response.body}"
+      when /5../
+        raise HTTPServerError, "Server Error: #{response.body}"
+      end
+    end
+
+    class HandlerDSL
+      def handlers
+        @handlers ||= {}
+      end
+
+      def status(regex, &block)
+        handlers[regex] = block
+      end
     end
 
     class Request

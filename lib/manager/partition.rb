@@ -15,17 +15,17 @@ class Manager
     extend Assembler
 
     assemble_from(
+      :id,
       :service_id,
       :agent,
-      :partition_key,
       :assigned_to,
       logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
-    attr_reader :assigned_to, :partition_key
+    attr_reader :assigned_to, :id
 
     def consul_path
-      "/v1/kv/#{service_id}/partition/#{partition_key}"
+      "/v1/kv/#{service_id}/partition/#{id}"
     end
 
     def assigned_to?(node)
@@ -41,28 +41,28 @@ class Manager
     end
 
     def acquire
-      logger.info(log_progname) { "Attempting to acquire partition #{partition_key}" }
+      logger.info(log_progname) { "Attempting to acquire partition #{id}" }
 
       if acquired_by?(service_id)
         return true
       elsif acquired_by
-        raise IllegalModificationException, "Tried to acquire partition #{partition_key}, but it's already assigned to #{acquired_by}"
+        raise IllegalModificationException, "Tried to acquire partition #{id}, but it's already assigned to #{acquired_by}"
       else
-        agent.put_key(partition_key, service_id) do |b|
+        agent.put_key(id, service_id) do |b|
           b.queryargs = {cas: remote_value["ModifyIndex"]}
         end
       end
     end
 
     def release
-      logger.info(log_progname) { "Attempting to release partition #{partition_key}" }
+      logger.info(log_progname) { "Attempting to release partition #{id}" }
 
       if !acquired_by
         return true
       elsif !acquired_by?(service_id)
-        raise IllegalModificationException, "Tried to release partition #{partition_key}, but it's assigned to #{acquired_by}"
+        raise IllegalModificationException, "Tried to release partition #{id}, but it's assigned to #{acquired_by}"
       else
-        agent.set_key(partition_key, nil) do |b|
+        agent.put_key(id, nil) do |b|
           b.queryargs = {cas: remote_value["ModifyIndex"]}
         end
       end
@@ -71,7 +71,7 @@ class Manager
     private
 
     def remote_value
-      @remote_value = agent.get_key(partition_key)
+      @remote_value = agent.get_key(id)
     end
   end
 end

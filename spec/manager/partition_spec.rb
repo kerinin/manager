@@ -1,13 +1,13 @@
 describe Manager::Partition do
   let(:get_response) { OpenStruct.new(value: 'foo') }
 
-  let(:fake_agent) { double("Agent", set_key: true, get_key: get_response) }
+  let(:fake_agent) { double("Agent", put_key: true, get_key: get_response) }
 
   let(:partition_args) do
     {
       service_id: :service_id,
       agent: fake_agent,
-      partition_key: :partition_key,
+      id: :partition_id,
       assigned_to: :assigned_to,
     }
   end
@@ -41,7 +41,7 @@ describe Manager::Partition do
       pending "Think more about the missing key semantics"
 
       allow(fake_agent).to receive(:get_key).
-        with('v1/kv/partition_key').and_return(OpenStruct.new(value: nil))
+        with('v1/kv/partition_id').and_return(OpenStruct.new(value: nil))
 
       expect(partition.acquired_by).to eq(nil)
     end
@@ -50,14 +50,14 @@ describe Manager::Partition do
   describe "#acquired_by?" do
     it "returns true if the passed instance matches the remote partition value" do
       allow(fake_agent).to receive(:get_key).
-        with('v1/kv/partition_key').and_return(get_response)
+        with('v1/kv/partition_id').and_return(get_response)
 
       expect(partition.acquired_by?(:foo)).to be_true
     end
 
     it "returns false if the passed instance doesn't match the remote partition value" do
       allow(fake_agent).to receive(:get_key).
-        with('v1/kv/partition_key').and_return(get_response)
+        with('v1/kv/partition_id').and_return(get_response)
 
       expect(partition.acquired_by?(:bar)).to be_false
     end
@@ -68,7 +68,7 @@ describe Manager::Partition do
       partition_args.merge!(assigned_to: :service_id)
       allow(get_response).to receive(:value).and_return('service_id')
 
-      expect(fake_agent).to_not receive(:set_key)
+      expect(fake_agent).to_not receive(:put_key)
 
       partition.acquire
     end
@@ -78,9 +78,8 @@ describe Manager::Partition do
       allow(get_response).to receive(:value).and_return(nil)
       allow(get_response).to receive(:modify_index).and_return(100)
 
-      expect(fake_agent).to receive(:set_key).
-        # with(:partition_key, :service_id, queryargs: {cas: 100})
-        with(:partition_key, :service_id)
+      expect(fake_agent).to receive(:put_key).
+        with(:partition_id, :service_id)
 
       partition.acquire
     end
@@ -104,7 +103,7 @@ describe Manager::Partition do
     it "doesn't modify remote partition if its value is already nil" do
       allow(get_response).to receive(:value).and_return(nil)
 
-      expect(fake_agent).to_not receive(:set_key)
+      expect(fake_agent).to_not receive(:put_key)
 
       partition.release
     end
@@ -113,9 +112,8 @@ describe Manager::Partition do
       allow(get_response).to receive(:value).and_return('service_id')
       allow(get_response).to receive(:modify_index).and_return(100)
 
-      expect(fake_agent).to receive(:set_key).
-        # with(:partition_key, nil, queryargs: {cas: 100})
-        with(:partition_key, nil)
+      expect(fake_agent).to receive(:put_key).
+        with(:partition_id, nil)
 
       partition.release
     end
