@@ -19,6 +19,7 @@ class Manager
       :agent,
       :config,
       :assigned_to,
+      :remote_value,
       logger: Logger.new(STDOUT),
       log_progname: self.name,
     )
@@ -60,9 +61,7 @@ class Manager
       elsif !acquired_by?(config.node) && !force
         logger.warn(log_progname) { "Tried to release partition #{id}, but it's assigned to #{acquired_by}" }
       else
-        agent.put_key(partition_key, nil) do |b|
-          b.queryargs = {cas: remote_value.modify_index}
-        end
+        agent.put_key(partition_key, nil, cas: remote_value.modify_index)
       end
     end
 
@@ -70,10 +69,6 @@ class Manager
 
     def partition_key
       @paritition_key ||= "#{config.service_id}/p_#{id}"
-    end
-
-    def remote_value
-      @remote_value ||= agent.get_key(partition_key)
     end
   end
 end

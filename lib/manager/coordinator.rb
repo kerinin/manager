@@ -7,9 +7,11 @@ class Manager
       log_progname: self.name,
     )
 
-    def add_listener(endpoint, &block)
-      return true if threads.has_key?(endpoint)
+    def listening_to?(endpoint)
+      threads.has_key?(endpoint)
+    end
 
+    def add_listener(endpoint, &block)
       logger.debug(log_progname) { "Adding listener on '#{endpoint}'" }
 
       threads[endpoint] = Thread.new {
@@ -34,7 +36,7 @@ class Manager
         sleep 1
       end
     ensure
-      threads.values.each(&:kill)
+      kill
     end
 
     def drain_work_queue
@@ -84,15 +86,15 @@ class Manager
           value, index = do_request(last_index)
 
           if index.nil?
+            # For endpoints that don't support blocking reads
             if value != last_value
               last_value = value
               block.call(value)
             end
-            # For endpoints that don't support blocking reads, just sleep for a 
-            # minute and then poll again
             sleep 60
 
           elsif index != last_index
+            # For endpoints that do
             last_index = index
             block.call(value)
           end
@@ -122,7 +124,6 @@ class Manager
           return JSON.parse(res.body), res.headers["X-Consul-Index"]
         when /404/
           return nil, res.headers["X-Consul-Index"]
-          # return nil, 0
         else
           raise StandardError, "WTF? #{endpoint} #{res.status} #{res.headers}, #{res.body}"
         end

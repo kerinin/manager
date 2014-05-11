@@ -27,7 +27,7 @@ class Manager
         exec command
       else
         begin
-          res = Request.new(verb: :get, path: '/v1/catalog/services').response
+          res = Request.get(path: '/v1/catalog/services').response
           sleep 1
         rescue Faraday::Error::ConnectionFailed
           sleep 1
@@ -40,26 +40,19 @@ class Manager
     end
 
     def join(consul_server)
-      res = Request.new do |b|
-        b.verb = :get
-        b.path = "/v1/agent/join/#{consul_server}"
-
-        yield b if block_given?
-      end.response
+      res = Request.get(path: "/v1/agent/join/#{consul_server}").response
 
       ret = handle_response(res)
       logger.info(log_progname) { "Joined Consul server cluster at '#{consul_server}'" }
       ret
     end
 
-    def register_service(service_definition)
-      res = Request.new do |b|
-        b.verb = :put
+    def register_service(service_definition, options={})
+      res = Request.put do |b|
         b.path = "/v1/agent/service/register"
         b.content_type = "application/json"
         b.body = JSON.dump(service_definition)
-
-        yield b if block_given?
+        b.queryargs = options
       end.response
 
       ret = handle_response(res)
@@ -68,12 +61,7 @@ class Manager
     end
 
     def deregister_service(service_id)
-      res = Request.new do |b|
-        b.verb = :put
-        b.path = "/v1/agent/service/deregister/#{service_id}"
-
-        yield b if block_given?
-      end.response
+      res = Request.put(path: "/v1/agent/service/deregister/#{service_id}").response
 
       ret = handle_response(res)
       logger.info(log_progname) { "Deregestered service '#{service_id}'" }
@@ -81,12 +69,9 @@ class Manager
     end
 
     def get_key(key, options={})
-      res = Request.new do |b|
-        b.verb = :get
+      res = Request.get do |b|
         b.path = "v1/kv/#{key}"
         b.queryargs = options
-
-        yield b if block_given?
       end.response
 
       ret = handle_response(res) do |h|
@@ -117,24 +102,50 @@ class Manager
       ret
     end
 
+    def get_keys(key, options={})
+      res = Request.get do |b|
+        b.path = "v1/kv/#{key}"
+        b.queryargs = options.merge(recurse: true)
+      end.response
+
+      ret = handle_response(res) do |h|
+        h.status /2../ do
+          values = JSON.parse(res.body).map do |json|
+            [
+              json["Key"],
+              OpenStruct.new(
+                value: YAML.load(Base64.decode64(json["Value"])),
+                create_index: json["CreateIndex"],
+                modify_index: json["ModifyIndex"],
+                flags: json["Flags"],
+              ),
+            ]
+          end
+          Hash[values]
+        end
+
+        h.status /404/ do
+          {}
+        end
+      end
+
+      logger.debug(log_progname) { "Got key '#{key}' with value '#{ret}'" }
+      ret
+    end
     def put_key(key, value, options={})
-      res = Request.new do |b|
-        b.verb = :put
+      res = Request.put do |b|
         b.path = "/v1/kv/#{key}"
         b.queryargs = options
         b.content_type = 'text/yaml'
 
         # This is being recorded as having surrounding quotation marks...
         b.body = YAML.dump(value)
-
-        yield b if block_given?
       end.response
 
       handle_response(res) do |h|
         h.status /2../ do
-          if res.body.chomp == 'false'
-            raise CASException 
-          end
+          raise CASException if res.body.chomp == 'false'
+
           true
         end
       end
@@ -144,12 +155,9 @@ class Manager
     end
 
     def delete_key(key, options={})
-      res = Request.new do |b|
-        b.verb = :delete
+      res = Request.delete do |b|
         b.path = "/v1/kv/#{key}"
         b.queryargs = options
-
-        yield b if block_given?
       end.response
 
       ret = handle_response(res)
@@ -158,12 +166,9 @@ class Manager
     end
 
     def get_service_health(service_id, options={})
-      res = Request.new do |b|
-        b.verb = :get
+      res = Request.get do |b|
         b.path = "v1/health/service/#{service_id}"
         b.queryargs = options
-
-        yield b if block_given?
       end.response
 
       ret = handle_response(res) do |h|
@@ -176,13 +181,11 @@ class Manager
       ret
     end
 
-    def register_check(check)
-      res = Request.new do |b|
-        b.verb = :put
+    def register_check(check, options={})
+      res = Request.put do |b|
         b.path = "/v1/agent/check/register"
         b.body = JSON.dump(check)
-
-        yield b if block_given?
+        b.queryargs = options
       end.response
 
       ret = handle_response(res)
@@ -190,12 +193,10 @@ class Manager
       ret
     end
 
-    def force_leave(node)
-      res = Request.new do |b|
-        b.verb = :get
+    def force_leave(node, options={})
+      res = Request.get do |b|
         b.path = "/v1/agent/force-leave/#{node}"
-
-        yield b if block_given?
+        b.queryargs = options
       end.response
 
       ret = handle_response(res)
@@ -247,6 +248,27 @@ class Manager
 
     class Request
       extend Assembler
+
+      def self.get(*args, &block)
+        new(*args) do |b|
+          b.verb = :get
+          block.call(b) unless block.nil?
+        end
+      end
+
+      def self.put(*args, &block)
+        new(*args) do |b|
+          b.verb = :put
+          block.call(b) unless block.nil?
+        end
+      end
+
+      def self.delete(*args, &block)
+        new(*args) do |b|
+          b.verb = :delete
+          block.call(b) unless block.nil?
+        end
+      end
 
       assemble_from(
         :verb,

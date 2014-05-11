@@ -143,10 +143,12 @@ class Manager
         else
           logger.debug(log_progname) { "Waiting for partition '#{partition.id}' to become available" }
 
-          coordinator.add_listener(partition.consul_path) do
-            logger.info(log_progname) { "Value of partition '#{partition.id}' changed" }
+          unless coordinator.listening_to?(partition.consul_path) 
+            coordinator.add_listener(partition.consul_path) do
+              logger.info(log_progname) { "Value of partition '#{partition.id}' changed" }
 
-            rebalance
+              rebalance
+            end
           end
         end
       else

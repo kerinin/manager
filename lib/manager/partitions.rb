@@ -28,11 +28,24 @@ class Manager
 
     def each(&block)
       partition_assignments.each do |id, node_id|
+        partition_key = "#{config.service_id}/p_#{id}"
+        if consul_kv_data.has_key?(partition_key)
+          remote_value = consul_kv_data[partition_key]
+        else
+          remote_value = OpenStruct.new(
+            value: nil,
+            create_index: nil,
+            modify_index: 0,
+            flags: [],
+          )
+        end
+
         partition = Partition.new(
           id: id,
           agent: agent,
           config: config,
           assigned_to: node_id,
+          remote_value: remote_value,
           logger: logger,
         )
         block.call partition
@@ -47,14 +60,17 @@ class Manager
 
     private
 
-    # The Consul key name where the set of partitions is stored
+    def consul_kv_data
+      @consul_kv_data ||= agent.get_keys(config.service_id)
+    end
+
     def partitions_key
-      @partitions_key ||= [config.service_id, :partitions].join('/')
+      "#{config.service_id}/partitions"
     end
 
     # The set of partitions to be allocated
     def partition_ids
-      @partition_ids ||= agent.get_key(partitions_key).value
+      consul_kv_data[partitions_key].value
     end
 
     def partition_assignments
