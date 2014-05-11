@@ -1,0 +1,12 @@
+Short Term
+===
+* Setup in internal health check so we can detect if a failure segfaults or is kill -9'd
+* Fuzz test quitting at random times during 'ensure' blocks
+* Improve consistent hashing (make more uniform)
+* Test starting actual processes, daemons (upstart)
+
+Longer Term
+===
+* Health checks and handlers
+* Rebalance timer (rebalance after N minutes if node doesn't re-appear)
+* Max active partitions, local partition cycling
