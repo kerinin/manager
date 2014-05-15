@@ -144,7 +144,7 @@ class Manager
 
       handle_response(res) do |h|
         h.status /2../ do
-          raise CASException if res.body.chomp == 'false'
+          raise CASException if res.body && res.body.chomp == 'false'
 
           true
         end

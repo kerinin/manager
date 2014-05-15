@@ -12,8 +12,11 @@ class Manager
     module ConsistentHashPartitioner
       def self.call(partitions, nodes)
         ring = ConsistentHashing::Ring.new
-        nodes.each { |node| ring.add(node) }
-        Hash[partitions.map { |key| [key, ring.node_for(key)] }]
+        nodes.each do |node|
+          # This helps balance the ring for small node cardinalities
+          (0...100).each { |i| ring.add([node, i]) }
+        end
+        Hash[partitions.map { |key| [key, ring.node_for(key).first] }]
       end
     end
 
@@ -21,8 +24,8 @@ class Manager
       :agent,
       :config,
       logger: Logger.new(STDOUT),
-      # partitioner: ConsistentHashPartitioner,
-      partitioner: LinearPartitioner,
+      partitioner: ConsistentHashPartitioner,
+      # partitioner: LinearPartitioner,
       log_progname: self.name,
     )
 

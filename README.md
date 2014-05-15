@@ -86,6 +86,11 @@ manager = Manager.new do |m|
       name: partition,  # The name allows us to lookup the PID later
       command: 'bundle exec ruby process_kafka_partition.rb --partition #{partition}'
     )
+
+    # If you want your process to be restarted on failure, use #daemonize
+    Manger.daemonize("partition_#{partition}_daemon") do
+      exec "PARTITION=#{partition} bundle exec ruby process_kafka_partition.rb"
+    end
   end
 
   # Now we tell the manager how to gracefully stop doing work

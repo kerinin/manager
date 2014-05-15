@@ -7,6 +7,17 @@ class Manager
       log_progname: self.name,
     )
 
+    def add_timer(name, interval = 10, &block)
+      logger.debug(log_progname) { "Adding timer named #{name} with #{interval}s interval" }
+
+      threads[name] = Thread.new {
+        loop do
+          work_queue << [block, name]
+          sleep interval
+        end
+      }
+    end
+
     def listening_to?(endpoint)
       threads.has_key?(endpoint)
     end
@@ -115,7 +126,6 @@ class Manager
 
           res = connection.get(
             request_endpoint,
-            timeout: timeout + 60,
           )
         end
 
@@ -132,7 +142,7 @@ class Manager
       end
 
       def connection
-        @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
+        @connection ||= Faraday.new(url: 'http://127.0.0.1:8500', timeout: timeout + 60) do |f|
           f.adapter   Faraday.default_adapter
         end
       end

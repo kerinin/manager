@@ -18,8 +18,9 @@ Gem::Specification.new do |spec|
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
   spec.require_paths = ["lib"]
 
-  spec.add_development_dependency "assembler"
-  spec.add_development_dependency "consistent-hashing"
+  spec.add_dependency "assembler"
+  spec.add_dependency "consistent-hashing"
+  spec.add_dependency "daemons"
   spec.add_dependency "faraday", '~> 0.8.9'
   spec.add_dependency "faraday_middleware", '~> 0.9.0'
 

@@ -21,14 +21,6 @@ describe Manager::Agent do
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1")
     end
 
-    it "accepts queryargs" do
-      stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").with(query: {wan: 1})
-      agent.join('127.0.0.1') do |b|
-        b.queryargs = {wan: 1}
-      end
-      expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1").with(query: {wan: 1})
-    end
-
     it "returns true on 200 response" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/join/127.0.0.1")
       expect(agent.join('127.0.0.1')).to be_true
@@ -49,9 +41,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:get, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'}).to_return(body: '[]')
-      agent.get_key(:foo) do |b|
-        b.queryargs = {dc: 'dc'}
-      end
+      agent.get_key(:foo, dc: 'dc')
+
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'})
     end
 
@@ -92,9 +83,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:put, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'})
-      agent.put_key(:foo, :bar) do |b|
-        b.queryargs = {dc: 'dc'}
-      end
+      agent.put_key(:foo, :bar, dc: 'dc')
+
       expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/kv/foo").with(body: YAML.dump(:bar), query: {dc: 'dc'})
     end
 
@@ -129,9 +119,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:delete, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'})
-      agent.delete_key(:foo) do |b|
-        b.queryargs = {dc: 'dc'}
-      end
+      agent.delete_key(:foo, dc: 'dc')
+
       expect(WebMock).to have_requested(:delete, "http://127.0.0.1:8500/v1/kv/foo").with(query: {dc: 'dc'})
     end
 
@@ -159,9 +148,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:put, "http://127.0.0.1:8500/v1/agent/service/register").with(query: {dc: 'dc'})
-      agent.register_service(Name: :service) do |b|
-        b.queryargs = {dc: 'dc'}
-      end
+      agent.register_service({Name: :service}, dc: 'dc')
+
       expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/service/register").with(query: {dc: 'dc'})
     end
 
@@ -188,9 +176,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:put, "http://127.0.0.1:8500/v1/agent/check/register").with(query: {dc: 'dc'})
-      agent.register_check(:foo) do |b|
-        b.queryargs = {dc: 'dc'}
-      end
+      agent.register_check(:foo, dc: 'dc')
+
       expect(WebMock).to have_requested(:put, "http://127.0.0.1:8500/v1/agent/check/register").with(query: {dc: 'dc'})
     end
 
@@ -217,9 +204,8 @@ describe Manager::Agent do
 
     it "accepts queryargs" do
       stub_request(:get, "http://127.0.0.1:8500/v1/agent/force-leave/foo").with(query: {wan: 1})
-      agent.force_leave(:foo) do |b|
-        b.queryargs = {wan: 1}
-      end
+      agent.force_leave(:foo, wan: 1)
+
       expect(WebMock).to have_requested(:get, "http://127.0.0.1:8500/v1/agent/force-leave/foo").with(query: {wan: 1})
     end
 

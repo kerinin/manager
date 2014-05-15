@@ -29,7 +29,9 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
+          get_keys: {
+            'service_id/partitions' => OpenStruct.new(value: ['partition1', 'partition2'])
+          },
         )
       end
 
@@ -66,7 +68,9 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
+          get_keys: {
+            'service_id/partitions' => OpenStruct.new(value: ['partition1', 'partition2'])
+          },
         )
       end
 
@@ -103,7 +107,9 @@ describe Manager::Partitions do
               ]
             }
           ],
-          get_key: OpenStruct.new(value: ['partition1', 'partition2']),
+          get_keys: {
+            'service_id/partitions' => OpenStruct.new(value: ['partition1', 'partition2'])
+          },
         )
       end
 

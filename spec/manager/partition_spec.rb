@@ -1,14 +1,17 @@
 describe Manager::Partition do
-  let(:get_response) { OpenStruct.new(value: 'foo') }
+  let(:fake_agent) { double("Agent", put_key: true) }
 
-  let(:fake_agent) { double("Agent", put_key: true, get_key: get_response) }
+  let(:fake_config) { double("Config", node: :foo, service_id: :service_id) }
+
+  let(:remote_value) { OpenStruct.new(value: 'foo') }
 
   let(:partition_args) do
     {
-      service_id: :service_id,
-      agent: fake_agent,
       id: :partition_id,
+      agent: fake_agent,
+      config: fake_config,
       assigned_to: :assigned_to,
+      remote_value: remote_value,
     }
   end
 
@@ -49,16 +52,10 @@ describe Manager::Partition do
 
   describe "#acquired_by?" do
     it "returns true if the passed instance matches the remote partition value" do
-      allow(fake_agent).to receive(:get_key).
-        with('v1/kv/partition_id').and_return(get_response)
-
       expect(partition.acquired_by?(:foo)).to be_true
     end
 
     it "returns false if the passed instance doesn't match the remote partition value" do
-      allow(fake_agent).to receive(:get_key).
-        with('v1/kv/partition_id').and_return(get_response)
-
       expect(partition.acquired_by?(:bar)).to be_false
     end
   end
@@ -66,7 +63,6 @@ describe Manager::Partition do
   describe "#acquire" do
     it "doesn't modify remote partition if its value is already equal to service_id" do
       partition_args.merge!(assigned_to: :service_id)
-      allow(get_response).to receive(:value).and_return('service_id')
 
       expect(fake_agent).to_not receive(:put_key)
 
@@ -75,21 +71,24 @@ describe Manager::Partition do
 
     it "check-and-sets remote partition value to service_id" do
       partition_args.merge!(assigned_to: :service_id)
-      allow(get_response).to receive(:value).and_return(nil)
-      allow(get_response).to receive(:modify_index).and_return(100)
+      allow(remote_value).to receive(:value).and_return(nil)
+      allow(remote_value).to receive(:modify_index).and_return(100)
 
       expect(fake_agent).to receive(:put_key).
-        with(:partition_id, :service_id)
+        with("service_id/p_partition_id", :foo, cas: 100)
 
       partition.acquire
     end
     
-    it "raises error if assigned_to value doesn't match service_id" do
+    it "raises error if assigned_to value doesn't match node" do
+      allow(partition).to receive(:assigned_to).and_return('foo')
+      allow(fake_config).to receive(:node).and_return('bar')
+
       expect { partition.acquire }.to raise_error(Manager::Partition::IllegalModificationException)
     end
 
-    it "raises error if remote partition value refers to another service_id" do
-      allow(partition).to receive(:assigned_to).and_return(:service_id)
+    it "raises error if remote partition value refers to another node" do
+      allow(remote_value).to receive(:value).and_return('bar')
 
       expect { partition.acquire }.to raise_error(Manager::Partition::IllegalModificationException)
     end
@@ -101,7 +100,7 @@ describe Manager::Partition do
 
   describe "#release" do
     it "doesn't modify remote partition if its value is already nil" do
-      allow(get_response).to receive(:value).and_return(nil)
+      allow(remote_value).to receive(:value).and_return(nil)
 
       expect(fake_agent).to_not receive(:put_key)
 
@@ -109,17 +108,21 @@ describe Manager::Partition do
     end
 
     it "check-and-sets remote partition value to nil" do
-      allow(get_response).to receive(:value).and_return('service_id')
-      allow(get_response).to receive(:modify_index).and_return(100)
+      allow(remote_value).to receive(:value).and_return('foo')
+      allow(remote_value).to receive(:modify_index).and_return(100)
 
       expect(fake_agent).to receive(:put_key).
-        with(:partition_id, nil)
+        with('service_id/p_partition_id', nil, cas: 100)
 
       partition.release
     end
 
-    it "raises error if remote partition value doesn't match service_id" do
-      expect { partition.release }.to raise_error(Manager::Partition::IllegalModificationException)
+    it "doesn't modify remote partition if remote partition value doesn't match node" do
+      allow(remote_value).to receive(:value).and_return('bar')
+
+      expect(fake_agent).to_not receive(:put_key)
+
+      partition.release
     end
 
     it "raises error if CAS operation fails" do

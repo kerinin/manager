@@ -9,6 +9,8 @@ class Manager
       log_progname: self.name,
     )
 
+    attr_reader :partition
+
     def started?
       @started
     end

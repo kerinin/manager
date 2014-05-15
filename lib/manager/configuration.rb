@@ -1,8 +1,17 @@
 class Manager
   class Configuration
-    attr_writer :node, :service_id
+    attr_writer :node, :service_id, :max_active_partitions, :task_cycle_interval
     attr_accessor :service_name, :service_port
     attr_reader :on_acquiring_partition_block, :on_releasing_partition_block
+
+    def max_active_partitions
+      @max_active_partitions || 1
+    end
+
+    def task_cycle_interval
+      # Defaults to 10min
+      @task_cycle_interval || 600
+    end
 
     def node
       @node || `hostname`.chomp
