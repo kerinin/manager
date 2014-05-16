@@ -2,7 +2,6 @@ require 'assembler'
 require 'base64'
 require 'manager/version'
 require 'consistent_hashing'
-require 'daemons'
 require 'faraday'
 require 'faraday_middleware'
 require 'json'
@@ -24,16 +23,6 @@ class Manager
       block.call
     else
       pids[name] = pid
-    end
-  end
-
-  def self.daemons
-    @daemons ||= {}
-  end
-
-  def self.daemonize(name, &block)
-    daemons[name] = Daemons.call(app_name: name, multiple: true) do
-      block.call
     end
   end
 
