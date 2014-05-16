@@ -24,12 +24,20 @@ class Manager
           if active.count < config.max_active_partitions
             logger.debug(log_progname) { "Starting tasks" }
 
-            inactive.first.start unless inactive.empty?
+            if inactive.empty?
+              break
+            else
+              inactive.first.start
+            end
 
           elsif active.count > config.max_active_partitions
             logger.debug(log_progname) { "Terminating tasks" }
 
-            active.first.terminate unless active.empty?
+            if active.empty?
+              break
+            else
+              active.first.terminate
+            end
           else
             break
           end
