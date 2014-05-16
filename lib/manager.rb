@@ -20,7 +20,7 @@ class Manager
   def self.exec(name, script)
     pid = Process.fork
     if pid.nil?
-      exec script
+      Kernel.exec script
     else
       pids[name] = pid
     end

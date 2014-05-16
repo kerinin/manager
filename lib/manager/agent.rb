@@ -305,7 +305,7 @@ class Manager
       end
 
       def connection
-        @connection ||= Faraday.new(url: 'http://127.0.0.1:8500') do |f|
+        @connection ||= Faraday.new(url: 'http://localhost:8500') do |f|
           f.adapter   Faraday.default_adapter
           # f.use       FaradayMiddleware::EncodeJson
           # f.use       Faraday::Response::RaiseError
