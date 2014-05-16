@@ -2,6 +2,7 @@ require 'assembler'
 require 'base64'
 require 'manager/version'
 require 'consistent_hashing'
+require 'daemons'
 require 'faraday'
 require 'faraday_middleware'
 require 'json'
@@ -31,7 +32,7 @@ class Manager
   end
 
   def self.daemonize(name, &block)
-    daemons[name] = Daemons.call(name, multiple: true) do
+    daemons[name] = Daemons.call(app_name: name, multiple: true) do
       block.call
     end
   end
@@ -99,7 +100,7 @@ class Manager
 
   def force_release_partitions_for(node)
     failed_partitions = partitions.select do |partition|
-      failing_nodes.include?(partition.acquired_by)
+      partition.acquired_by == node
     end
     failed_partitions.each { |p| p.release(true) }
 

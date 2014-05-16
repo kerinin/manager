@@ -49,6 +49,10 @@ class Manager
           b.config = config
           b.logger = logger
         end
+
+        if tasks.values.select(&:started?).count < config.max_active_partitions
+          cycle
+        end
       end
     end
 
