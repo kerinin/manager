@@ -18,10 +18,10 @@ class Manager
     @pids ||= {}
   end
 
-  def self.exec(name, script)
+  def self.fork(name, &block)
     pid = Process.fork
     if pid.nil?
-      Kernel.exec script
+      block.call
     else
       pids[name] = pid
     end
